@@ -113,12 +113,24 @@ namespace LostAndFound.Domain.Entities
         /// </summary>
         public ICollection<PostImage> PostImages { get; set; } = new List<PostImage>();
         
-        // Photos navigation property - enabled for photo uploads
+        /// <summary>
+        /// Collection of photos uploaded with this post.
+        /// </summary>
         public ICollection<Photo> Photos { get; set; } = new List<Photo>();
-        //public ICollection<Comment> Comments { get; set; } = new List<Comment>();
-        //public ICollection<Like> Likes { get; set; } = new List<Like>();
-        //public ICollection<Share> Shares { get; set; } = new List<Share>();
-        //public Reward? Reward { get; set; }
+        
+        /// <summary>
+        /// Collection of comments on this post.
+        /// </summary>
+        public ICollection<Comment> Comments { get; set; } = new List<Comment>();
+        
+        /// <summary>
+        /// Collection of likes on this post.
+        /// </summary>
+        public ICollection<Like> Likes { get; set; } = new List<Like>();
+        
+        /// <summary>
+        /// Collection of shares of this post.
+        /// </summary>
+        public ICollection<Share> Shares { get; set; } = new List<Share>();
     }
 }
-

@@ -41,6 +41,52 @@ namespace LostAndFound.Domain.Entities
         /// Expiration timestamp for the verification code. Typically set to 24 hours from generation.
         /// </summary>
         public DateTime? VerificationCodeExpiry { get; set; }
+        
+        /// <summary>
+        /// Refresh token used to obtain new access tokens without re-authentication.
+        /// Stored as a secure random string.
+        /// </summary>
+        public string? RefreshToken { get; set; }
+        
+        /// <summary>
+        /// Expiration timestamp for the refresh token. Typically set to 7-30 days from generation.
+        /// </summary>
+        public DateTime? RefreshTokenExpiry { get; set; }
+        
+        /// <summary>
+        /// Token used for password reset requests. Generated when user requests password reset.
+        /// </summary>
+        public string? PasswordResetToken { get; set; }
+        
+        /// <summary>
+        /// Expiration timestamp for the password reset token. Typically set to 1 hour from generation.
+        /// </summary>
+        public DateTime? PasswordResetTokenExpiry { get; set; }
+
+        /// <summary>
+        /// Token used for email change requests. Generated when user requests email change.
+        /// </summary>
+        public string? EmailChangeToken { get; set; }
+        
+        /// <summary>
+        /// Expiration timestamp for the email change token. Typically set to 24 hours from generation.
+        /// </summary>
+        public DateTime? EmailChangeTokenExpiry { get; set; }
+        
+        /// <summary>
+        /// New email address awaiting verification. User must verify this before it becomes active.
+        /// </summary>
+        public string? PendingEmail { get; set; }
+
+        /// <summary>
+        /// Indicates whether the user account has been soft-deleted.
+        /// </summary>
+        public bool IsDeleted { get; set; } = false;
+        
+        /// <summary>
+        /// Timestamp when the user account was soft-deleted.
+        /// </summary>
+        public DateTime? DeletedAt { get; set; }
 
         // Profile Information (kept for existing features)
         /// <summary>
