@@ -20,7 +20,7 @@ namespace LostAndFound.Infrastructure.Persistence.Config
                 .HasMaxLength(10);
 
             builder.HasOne(r => r.Post)
-                .WithOne() /
+                .WithOne() 
                 .HasForeignKey<Reward>(r => r.PostId)
                 .OnDelete(DeleteBehavior.Cascade);
         }

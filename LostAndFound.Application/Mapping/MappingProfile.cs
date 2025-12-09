@@ -69,11 +69,11 @@ namespace LostAndFound.Application.Mapping
                 .ForMember(dest => dest.Posts, opt => opt.Ignore());
 
             // Location mappings
-            CreateMap<Location, LocationDto>();
-            CreateMap<CreateLocationDto, Location>()
-                .ForMember(dest => dest.CreatedAt, opt => opt.MapFrom(src => DateTime.UtcNow));
-            CreateMap<UpdateLocationDto, Location>()
-                .ForMember(dest => dest.UpdatedAt, opt => opt.MapFrom(src => DateTime.UtcNow));
+            //CreateMap<Location, LocationDto>();
+            //CreateMap<CreateLocationDto, Location>()
+            //    .ForMember(dest => dest.CreatedAt, opt => opt.MapFrom(src => DateTime.UtcNow));
+            //CreateMap<UpdateLocationDto, Location>()
+            //    .ForMember(dest => dest.UpdatedAt, opt => opt.MapFrom(src => DateTime.UtcNow));
 
             // Post mappings
             CreateMap<Post, PostDto>()
@@ -81,7 +81,6 @@ namespace LostAndFound.Application.Mapping
                 .ForMember(dest => dest.CategoryId, opt => opt.MapFrom(src => src.SubCategory != null ? src.SubCategory.CategoryId : 0))
                 .ForMember(dest => dest.Content, opt => opt.MapFrom(src => src.Content))
                 .ForMember(dest => dest.CategoryName, opt => opt.MapFrom(src => src.SubCategory != null && src.SubCategory.Category != null ? src.SubCategory.Category.Name : string.Empty))
-                .ForMember(dest => dest.Images, opt => opt.MapFrom(src => src.PostImages != null ? src.PostImages.Select(pi => pi.ImageUrl) : Enumerable.Empty<string>()))
                 .ForMember(dest => dest.Reward, opt => opt.MapFrom(src => src.RewardAmount.HasValue
                     ? src.RewardAmount.Value - (src.PlatformFeeAmount ?? 0m)
                     : (decimal?)null))
@@ -95,7 +94,21 @@ namespace LostAndFound.Application.Mapping
                         PostId = p.PostId,
                         UploadedAt = p.UploadedAt
                     }).ToList()
-                    : new List<PhotoDto>()));
+                    : new List<PhotoDto>()))
+                // Map social features counts
+                .ForMember(dest => dest.LikesCount, opt => opt.MapFrom(src => src.Likes != null ? src.Likes.Count : 0))
+                .ForMember(dest => dest.CommentsCount, opt => opt.MapFrom(src => src.Comments != null ? src.Comments.Count : 0))
+                .ForMember(dest => dest.SharesCount, opt => opt.MapFrom(src => src.Shares != null ? src.Shares.Count : 0))
+                // Map IsLikedByCurrentUser - requires current userId from context
+                .ForMember(dest => dest.IsLikedByCurrentUser, opt => opt.MapFrom((src, dest, destMember, context) =>
+                {
+                    // Try to get current userId from mapping context
+                    if (context.Items.TryGetValue("CurrentUserId", out var userIdObj) && userIdObj is int userId)
+                    {
+                        return src.Likes != null && src.Likes.Any(l => l.UserId == userId);
+                    }
+                    return false;
+                }));
 
 
             CreateMap<CreatePostDto, Post>()
