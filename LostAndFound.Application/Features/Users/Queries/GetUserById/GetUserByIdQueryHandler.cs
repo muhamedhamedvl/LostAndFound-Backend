@@ -39,11 +39,8 @@ namespace LostAndFound.Application.Features.Users.Queries.GetUserById
                     return BaseResponse<SafeUserDto>.FailureResult("User not found");
                 }
 
-                // Check authorization: Only admins can view other users, or users can view themselves
-                if (request.RequestingUserRole != "Admin" && request.RequestingUserId != request.Id)
-                {
-                    return BaseResponse<SafeUserDto>.FailureResult("Access denied. You can only view your own profile.");
-                }
+                // All authenticated users can view profiles (social media requirement)
+                // Profile data is already "safe" - no sensitive information exposed
 
                 return BaseResponse<SafeUserDto>.SuccessResult(user, "User retrieved successfully");
             }
