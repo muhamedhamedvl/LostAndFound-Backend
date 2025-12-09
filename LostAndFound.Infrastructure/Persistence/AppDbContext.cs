@@ -29,6 +29,12 @@ namespace LostAndFound.Infrastructure.Persistence
         public DbSet<ChatParticipant> ChatParticipants { get; set; }
         public DbSet<Photo> Photos { get; set; }
         public DbSet<PostImage> PostImages { get; set; }
+        
+        // Social features
+        public DbSet<Like> Likes { get; set; }
+        public DbSet<Comment> Comments { get; set; }
+        public DbSet<Share> Shares { get; set; }
+        public DbSet<Notification> Notifications { get; set; }
 
         /// <summary>
         /// Configures the database model and applies entity configurations.
@@ -49,6 +55,47 @@ namespace LostAndFound.Infrastructure.Persistence
             modelBuilder.ApplyConfiguration(new ChatMessageConfig());
             modelBuilder.ApplyConfiguration(new ChatParticipantConfig());
             modelBuilder.ApplyConfiguration(new PhotoConfig());
+            
+            // Configure social features relationships
+            modelBuilder.Entity<Like>()
+                .HasOne(l => l.Post)
+                .WithMany(p => p.Likes)
+                .HasForeignKey(l => l.PostId)
+                .OnDelete(DeleteBehavior.Cascade);
+                
+            modelBuilder.Entity<Like>()
+                .HasIndex(l => new { l.PostId, l.UserId })
+                .IsUnique(); // User can only like a post once
+                
+            modelBuilder.Entity<Comment>()
+                .HasOne(c => c.Post)
+                .WithMany(p => p.Comments)
+                .HasForeignKey(c => c.PostId)
+                .OnDelete(DeleteBehavior.Cascade);
+                
+            modelBuilder.Entity<Share>()
+                .HasOne(s => s.Post)
+                .WithMany(p => p.Shares)
+                .HasForeignKey(s => s.PostId)
+                .OnDelete(DeleteBehavior.Cascade);
+                
+            modelBuilder.Entity<Notification>()
+                .HasOne(n => n.Post)
+                .WithMany()
+                .HasForeignKey(n => n.PostId)
+                .OnDelete(DeleteBehavior.SetNull);
+                
+            modelBuilder.Entity<Notification>()
+                .HasOne(n => n.User)
+                .WithMany()
+                .HasForeignKey(n => n.UserId)
+                .OnDelete(DeleteBehavior.NoAction); // Prevent cascade cycles!
+                
+            modelBuilder.Entity<Notification>()
+                .HasOne(n => n.Actor)
+                .WithMany()
+                .HasForeignKey(n => n.ActorId)
+                .OnDelete(DeleteBehavior.NoAction); // Prevent cascade cycles!
         }
     }
 }
