@@ -24,6 +24,12 @@ namespace LostAndFound.Infrastructure.Persistence.Repositories
             ChatParticipants = new Repository<ChatParticipant>(_context);
             Photos = new Repository<Photo>(_context);
             PostImages = new Repository<PostImage>(_context);
+            
+            // Social features
+            Likes = new Repository<Like>(_context);
+            Comments = new Repository<Comment>(_context);
+            Shares = new Repository<Share>(_context);
+            Notifications = new Repository<Notification>(_context);
         }
 
         public IRepository<User> Users { get; }
@@ -37,6 +43,12 @@ namespace LostAndFound.Infrastructure.Persistence.Repositories
         public IRepository<ChatParticipant> ChatParticipants { get; }
         public IRepository<Photo> Photos { get; }
         public IRepository<PostImage> PostImages { get; }
+        
+        // Social features
+        public IRepository<Like> Likes { get; }
+        public IRepository<Comment> Comments { get; }
+        public IRepository<Share> Shares { get; }
+        public IRepository<Notification> Notifications { get; }
 
         public async Task<int> SaveChangesAsync()
         {

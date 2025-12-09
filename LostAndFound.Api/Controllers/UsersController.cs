@@ -156,7 +156,7 @@ namespace LostAndFound.Api.Controllers
         [HttpPost("admin")]
         [Authorize(Roles = "Admin")]
         [SwaggerOperation(
-            Summary = "Create a new user (worker)",
+            Summary = "Create a new user",
             Description = "Creates a new admin user account. This endpoint is restricted to existing Admin users only. Requires Admin role."
         )]
         [ProducesResponseType(typeof(BaseResponse<UserDto>), 201)]
@@ -391,7 +391,10 @@ namespace LostAndFound.Api.Controllers
                     "Owner.UserRoles", 
                     "Owner.UserRoles.Role",
                     "PostImages", 
-                    "Photos");
+                    "Photos",
+                    "Likes",
+                    "Comments",
+                    "Shares");
                 var posts = allPosts.Where(p => p.CreatorId == id).ToList();
                 var totalCount = posts.Count;
 
@@ -401,7 +404,7 @@ namespace LostAndFound.Api.Controllers
                     .Take(pageSize)
                     .ToList();
 
-                var postDtos = _mapper.Map<List<PostDto>>(pagedPosts);
+                var postDtos = _mapper.Map<List<PostDto>>(pagedPosts, opts => opts.Items["CurrentUserId"] = currentUserId);
 
                 return Ok(BaseResponse<object>.SuccessResult(new
                 {

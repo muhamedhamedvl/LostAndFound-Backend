@@ -32,7 +32,22 @@ namespace LostAndFound.Api.Controllers
         {
             try
             {
-                var posts = await _unitOfWork.Posts.GetAllAsync();
+                var userId = int.Parse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "0");
+                
+                var posts = await _unitOfWork.Posts.GetAllWithIncludesAsync(
+                    "SubCategory", 
+                    "SubCategory.Category", 
+                    "Creator", 
+                    "Creator.UserRoles", 
+                    "Creator.UserRoles.Role",
+                    "Owner", 
+                    "Owner.UserRoles", 
+                    "Owner.UserRoles.Role",
+                    "PostImages", 
+                    "Photos",
+                    "Likes",
+                    "Comments",
+                    "Shares");
                 
                 if (!string.IsNullOrEmpty(searchDto.Content))
                 {
@@ -73,7 +88,7 @@ namespace LostAndFound.Api.Controllers
                     .Take(searchDto.PageSize)
                     .ToList();
 
-                var postDtos = _mapper.Map<List<PostDto>>(pagedPosts);
+                var postDtos = _mapper.Map<List<PostDto>>(pagedPosts, opts => opts.Items["CurrentUserId"] = userId);
 
                 return Ok(BaseResponse<object>.SuccessResult(new
                 {
@@ -100,10 +115,25 @@ namespace LostAndFound.Api.Controllers
         {
             try
             {
-                var posts = await _unitOfWork.Posts.GetAllAsync();
+                var userId = int.Parse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "0");
+                
+                var posts = await _unitOfWork.Posts.GetAllWithIncludesAsync(
+                    "SubCategory", 
+                    "SubCategory.Category", 
+                    "Creator", 
+                    "Creator.UserRoles", 
+                    "Creator.UserRoles.Role",
+                    "Owner", 
+                    "Owner.UserRoles", 
+                    "Owner.UserRoles.Role",
+                    "PostImages", 
+                    "Photos",
+                    "Likes",
+                    "Comments",
+                    "Shares");
                 var activePosts = posts.Where(p => p.Status == "Active").ToList();
 
-                var postDtos = _mapper.Map<List<PostDto>>(activePosts);
+                var postDtos = _mapper.Map<List<PostDto>>(activePosts, opts => opts.Items["CurrentUserId"] = userId);
                 return Ok(BaseResponse<List<PostDto>>.SuccessResult(postDtos, "Posts retrieved successfully. Note: Geographic proximity search requires location coordinates."));
             }
             catch (Exception ex)

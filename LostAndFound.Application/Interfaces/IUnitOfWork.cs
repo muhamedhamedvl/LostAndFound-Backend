@@ -10,19 +10,17 @@ namespace LostAndFound.Application.Interfaces
         IRepository<Post> Posts { get; }
         IRepository<Category> Categories { get; }
         IRepository<SubCategory> SubCategories { get; }
-        // TEMPORARILY DISABLED FOR MVP - Commented out to prevent EF Core tracking
-        //IRepository<Comment> Comments { get; }
-        //IRepository<Location> Locations { get; }
         IRepository<ChatSession> ChatSessions { get; }
         IRepository<ChatMessage> ChatMessages { get; }
         IRepository<ChatParticipant> ChatParticipants { get; }
-        // TEMPORARILY DISABLED FOR MVP - Commented out to prevent EF Core tracking
-        //IRepository<Notification> Notifications { get; }
-        //IRepository<Reward> Rewards { get; }
         IRepository<Photo> Photos { get; }
         IRepository<PostImage> PostImages { get; }
-        //IRepository<Like> Likes { get; }
-        //IRepository<Share> Shares { get; }
+        
+        // Social features - enabled
+        IRepository<Like> Likes { get; }
+        IRepository<Comment> Comments { get; }
+        IRepository<Share> Shares { get; }
+        IRepository<Notification> Notifications { get; }
 
         Task<int> SaveChangesAsync();
         Task BeginTransactionAsync();
