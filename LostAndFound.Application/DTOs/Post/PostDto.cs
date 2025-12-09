@@ -25,8 +25,12 @@ namespace LostAndFound.Application.DTOs.Post
         public DateTime CreatedAt { get; set; }
         public DateTime? UpdatedAt { get; set; }
         public List<PhotoDto> Photos { get; set; } = new();
-        public List<string> Images { get; set; } = new();
         public decimal? Reward { get; set; }
+        
+        // Social features
+        public int LikesCount { get; set; }
+        public int CommentsCount { get; set; }
+        public int SharesCount { get; set; }
+        public bool IsLikedByCurrentUser { get; set; }
     }
 }
-
