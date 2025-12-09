@@ -387,5 +387,212 @@ Lost & Found App
 Contact: {contactEmail}
 © {DateTime.UtcNow.Year} Lost & Found. All rights reserved.";
         }
+
+        /// <summary>
+        /// Sends a password reset email with a reset token.
+        /// Uses a clean, simple design consistent with verification emails.
+        /// </summary>
+        /// <param name="to">Recipient email address</param>
+        /// <param name="name">Recipient's full name</param>
+        /// <param name="resetToken">6-digit password reset token</param>
+        /// <returns>True if email sent successfully, false otherwise</returns>
+        public async Task<bool> SendPasswordResetEmailAsync(string to, string name, string resetToken)
+        {
+            var subject = "Password Reset Request - Lost & Found";
+            
+            Console.WriteLine("[EMAIL] === PASSWORD RESET EMAIL ===");
+            Console.WriteLine($"[EMAIL] To: {to}");
+            Console.WriteLine($"[EMAIL] Name: {name}");
+            Console.WriteLine($"[EMAIL] Reset Token: {resetToken}");
+            Console.WriteLine("[EMAIL] ============================");
+
+            // Get sender email for footer
+            var emailSettings = _configuration.GetSection("EmailSettings");
+            var contactEmail = emailSettings["From"] ?? emailSettings["FromEmail"] ?? "lost.found2026@gmail.com";
+
+            // Generate HTML email template
+            var htmlBody = GeneratePasswordResetEmailHtml(name, resetToken, contactEmail);
+            
+            // Generate plaintext version
+            var plainTextBody = GeneratePasswordResetEmailPlainText(name, resetToken, contactEmail);
+
+            // Send email with both HTML and plaintext versions
+            try
+            {
+                var emailSettingsSection = _configuration.GetSection("EmailSettings");
+                var smtpServer = emailSettingsSection["Host"] ?? emailSettingsSection["SmtpServer"] ?? "smtp.gmail.com";
+                var smtpPort = int.Parse(emailSettingsSection["Port"] ?? emailSettingsSection["SmtpPort"] ?? "587");
+                var smtpUsername = emailSettingsSection["From"] ?? emailSettingsSection["SmtpUsername"];
+                var smtpPassword = emailSettingsSection["Password"] ?? emailSettingsSection["SmtpPassword"];
+                var fromEmail = emailSettingsSection["From"] ?? emailSettingsSection["FromEmail"];
+                var fromName = "Lost & Found App";
+
+                if (string.IsNullOrWhiteSpace(smtpServer) || string.IsNullOrWhiteSpace(smtpUsername) || 
+                    string.IsNullOrWhiteSpace(smtpPassword) || string.IsNullOrWhiteSpace(fromEmail))
+                {
+                    Console.WriteLine("[ERROR] Email configuration is incomplete.");
+                    return false;
+                }
+
+                var message = new MimeMessage();
+                message.From.Add(new MailboxAddress(Encoding.UTF8, fromName, fromEmail));
+                message.To.Add(new MailboxAddress(Encoding.UTF8, "", to));
+                message.ReplyTo.Add(new MailboxAddress(Encoding.UTF8, fromName, fromEmail));
+                message.Subject = subject;
+
+                message.Headers.Add("X-Mailer", "LostAndFoundMailer");
+                message.Headers.Add("X-Entity-Ref-ID", Guid.NewGuid().ToString());
+                message.Headers.Add("MIME-Version", "1.0");
+                
+                var unsubscribeEmail = $"mailto:{fromEmail}?subject=Unsubscribe";
+                message.Headers.Add("List-Unsubscribe", unsubscribeEmail);
+                message.Headers.Add("List-Unsubscribe-Post", "List-Unsubscribe=One-Click");
+
+                var bodyBuilder = new BodyBuilder
+                {
+                    HtmlBody = htmlBody,
+                    TextBody = plainTextBody
+                };
+                
+                message.Body = bodyBuilder.ToMessageBody();
+
+                Console.WriteLine($"[EMAIL] Sending password reset email to: {to}");
+
+                return await SendEmailWithRetryAsync(message, smtpServer, smtpPort, smtpUsername, smtpPassword, to);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ERROR] Password reset email sending failed: {ex.Message}");
+                Console.WriteLine($"[ERROR] Exception Type: {ex.GetType().Name}");
+                Console.WriteLine($"[ERROR] Stack Trace: {ex.StackTrace}");
+                
+                if (ex.InnerException != null)
+                {
+                    Console.WriteLine($"[ERROR] Inner Exception: {ex.InnerException.Message}");
+                }
+                
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Generates the HTML template for password reset email.
+        /// </summary>
+        private string GeneratePasswordResetEmailHtml(string name, string resetToken, string contactEmail)
+        {
+            var safeName = System.Net.WebUtility.HtmlEncode(name);
+            var safeToken = System.Net.WebUtility.HtmlEncode(resetToken);
+            var safeEmail = System.Net.WebUtility.HtmlEncode(contactEmail);
+
+            return $@"<!DOCTYPE html>
+<html lang=""en"">
+<head>
+    <meta charset=""UTF-8"">
+    <meta name=""viewport"" content=""width=device-width, initial-scale=1.0"">
+    <meta http-equiv=""Content-Type"" content=""text/html; charset=UTF-8"">
+    <title>Password Reset</title>
+</head>
+<body style=""margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; background-color: #f5f5f5; color: #333333;"">
+    <table role=""presentation"" style=""width: 100%; border-collapse: collapse; background-color: #f5f5f5;"">
+        <tr>
+            <td style=""padding: 40px 20px;"">
+                <table role=""presentation"" style=""max-width: 600px; margin: 0 auto; background-color: #ffffff; border-collapse: collapse; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);"">
+                    <!-- Header -->
+                    <tr>
+                        <td style=""padding: 30px 30px 20px 30px; text-align: center; border-bottom: 2px solid #e0e0e0;"">
+                            <h1 style=""margin: 0; font-size: 24px; font-weight: 600; color: #333333;"">Lost & Found</h1>
+                        </td>
+                    </tr>
+                    
+                    <!-- Main Content -->
+                    <tr>
+                        <td style=""padding: 30px;"">
+                            <p style=""margin: 0 0 20px 0; font-size: 16px; line-height: 1.6; color: #333333;"">Hello {safeName},</p>
+                            
+                            <p style=""margin: 0 0 20px 0; font-size: 16px; line-height: 1.6; color: #333333;"">We received a request to reset your password for your Lost & Found account. Please use the reset code below to set a new password:</p>
+                            
+                            <!-- Reset Token Box -->
+                            <table role=""presentation"" style=""width: 100%; margin: 30px 0; border-collapse: collapse;"">
+                                <tr>
+                                    <td style=""text-align: center; padding: 20px;"">
+                                        <div style=""display: inline-block; background-color: #f8f9fa; border: 2px solid #dee2e6; border-radius: 6px; padding: 20px 40px;"">
+                                            <span style=""font-size: 36px; font-weight: 700; letter-spacing: 6px; color: #333333; font-family: 'Courier New', monospace;"">{safeToken}</span>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </table>
+                            
+                            <p style=""margin: 20px 0; font-size: 14px; line-height: 1.6; color: #666666;"">This reset code will expire in 1 hour.</p>
+                            
+                            <p style=""margin: 20px 0 0 0; font-size: 16px; line-height: 1.6; color: #333333;"">If you did not request a password reset, you can safely ignore this email. Your password will remain unchanged.</p>
+                        </td>
+                    </tr>
+                    
+                    <!-- Footer -->
+                    <tr>
+                        <td style=""padding: 30px; background-color: #f8f9fa; border-top: 1px solid #e0e0e0; border-radius: 0 0 8px 8px;"">
+                            <p style=""margin: 0 0 15px 0; font-size: 14px; line-height: 1.6; color: #666666;"">You received this email because a password reset was requested for your Lost & Found account.</p>
+                            <p style=""margin: 0 0 15px 0; font-size: 14px; line-height: 1.6; color: #666666;"">If this was not you, please contact us immediately.</p>
+                            <p style=""margin: 15px 0 0 0; font-size: 12px; line-height: 1.6; color: #999999; border-top: 1px solid #e0e0e0; padding-top: 15px;"">
+                                Lost & Found App<br>
+                                Contact: {safeEmail}<br>
+                                © {DateTime.UtcNow.Year} Lost & Found. All rights reserved.
+                            </p>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>";
+        }
+
+        /// <summary>
+        /// Generates the plaintext version of the password reset email.
+        /// </summary>
+        private string GeneratePasswordResetEmailPlainText(string name, string resetToken, string contactEmail)
+        {
+            return $@"Lost & Found
+
+Hello {name},
+
+We received a request to reset your password for your Lost & Found account. Please use the reset code below to set a new password:
+
+Reset Code: {resetToken}
+
+This reset code will expire in 1 hour.
+
+If you did not request a password reset, you can safely ignore this email. Your password will remain unchanged.
+
+---
+
+You received this email because a password reset was requested for your Lost & Found account.
+If this was not you, please contact us immediately.
+
+Lost & Found App
+Contact: {contactEmail}
+© {DateTime.UtcNow.Year} Lost & Found. All rights reserved.";
+        }
+
+        public async Task<bool> SendEmailChangeVerificationAsync(string to, string name, string verificationCode, string newEmail)
+        {
+            var subject = "Email Change Verification - Lost & Found";
+            var contactEmail = _configuration.GetSection("EmailSettings")["From"] ?? "lost.found2026@gmail.com";
+
+            var htmlBody = $@"<!DOCTYPE html>
+<html>
+<body style=""font-family: Arial, sans-serif; padding: 20px;"">
+    <h2>Lost & Found</h2>
+    <p>Hello {System.Net.WebUtility.HtmlEncode(name)},</p>
+    <p>You requested to change your email to <strong>{System.Net.WebUtility.HtmlEncode(newEmail)}</strong>.</p>
+    <p>Your verification code is: <strong style=""font-size: 24px; letter-spacing: 3px;"">{System.Net.WebUtility.HtmlEncode(verificationCode)}</strong></p>
+    <p>This code expires in 24 hours.</p>
+    <p style=""color: #666; font-size: 12px;""Contact: {System.Net.WebUtility.HtmlEncode(contactEmail)}</p>
+</body>
+</html>";
+
+            return await SendEmailAsync(to, subject, htmlBody, true);
+        }
     }
 }
