@@ -46,6 +46,8 @@ namespace LostAndFound.Api.Controllers
         {
             try
             {
+                var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "0");
+                
                 var allPosts = await _unitOfWork.Posts.GetAllWithIncludesAsync(
                     "SubCategory", 
                     "SubCategory.Category", 
@@ -56,7 +58,10 @@ namespace LostAndFound.Api.Controllers
                     "Owner.UserRoles", 
                     "Owner.UserRoles.Role",
                     "PostImages", 
-                    "Photos");
+                    "Photos",
+                    "Likes",
+                    "Comments",
+                    "Shares");
                 var totalCount = allPosts.Count();
 
                 var pagedPosts = allPosts
@@ -65,7 +70,7 @@ namespace LostAndFound.Api.Controllers
                     .Take(pageSize)
                     .ToList();
 
-                var postDtos = _mapper.Map<List<PostDto>>(pagedPosts);
+                var postDtos = _mapper.Map<List<PostDto>>(pagedPosts, opts => opts.Items["CurrentUserId"] = userId);
 
                 return Ok(BaseResponse<object>.SuccessResult(new
                 {
@@ -91,6 +96,8 @@ namespace LostAndFound.Api.Controllers
         {
             try
             {
+                var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "0");
+                
                 var allPosts = await _unitOfWork.Posts.GetAllWithIncludesAsync(
                     "SubCategory", 
                     "SubCategory.Category", 
@@ -101,7 +108,10 @@ namespace LostAndFound.Api.Controllers
                     "Owner.UserRoles", 
                     "Owner.UserRoles.Role",
                     "PostImages", 
-                    "Photos");
+                    "Photos",
+                    "Likes",
+                    "Comments",
+                    "Shares");
                 var post = allPosts.FirstOrDefault(p => p.Id == id);
                 
                 if (post == null)
@@ -109,7 +119,7 @@ namespace LostAndFound.Api.Controllers
                     return NotFound(BaseResponse<PostDto>.FailureResult("Post not found"));
                 }
                 
-                var postDto = _mapper.Map<PostDto>(post);
+                var postDto = _mapper.Map<PostDto>(post, opts => opts.Items["CurrentUserId"] = userId);
 
                 return Ok(BaseResponse<PostDto>.SuccessResult(postDto, "Post retrieved successfully"));
             }
@@ -150,8 +160,6 @@ namespace LostAndFound.Api.Controllers
                 {
                     return BadRequest(BaseResponse<PostDto>.FailureResult("SubCategory not found."));
                 }
-
-                await _unitOfWork.BeginTransactionAsync();
 
                 var post = _mapper.Map<Post>(createPostDto);
                 post.CreatorId = userId; 
@@ -239,8 +247,6 @@ namespace LostAndFound.Api.Controllers
                 {
                     // Log error but don't fail the post creation
                 }
-
-                await _unitOfWork.CommitTransactionAsync();
                 
                 var allPosts = await _unitOfWork.Posts.GetAllWithIncludesAsync(
                     "SubCategory", 
@@ -252,15 +258,17 @@ namespace LostAndFound.Api.Controllers
                     "Owner.UserRoles", 
                     "Owner.UserRoles.Role",
                     "PostImages", 
-                    "Photos");
+                    "Photos",
+                    "Likes",
+                    "Comments",
+                    "Shares");
                 var postWithPhotos = allPosts.FirstOrDefault(p => p.Id == post.Id);
-                var postDto = _mapper.Map<PostDto>(postWithPhotos);
+                var postDto = _mapper.Map<PostDto>(postWithPhotos, opts => opts.Items["CurrentUserId"] = userId);
                 
                 return CreatedAtAction(nameof(GetPost), new { id = post.Id }, BaseResponse<PostDto>.SuccessResult(postDto, "Post created successfully"));
             }
             catch (Exception ex)
             {
-                await _unitOfWork.RollbackTransactionAsync();
                 var errorMessage = ex.Message;
                 if (ex.InnerException != null)
                 {
@@ -404,9 +412,12 @@ namespace LostAndFound.Api.Controllers
                     "Owner.UserRoles", 
                     "Owner.UserRoles.Role",
                     "PostImages", 
-                    "Photos");
+                    "Photos",
+                    "Likes",
+                    "Comments",
+                    "Shares");
                 var updatedPost = allPosts.FirstOrDefault(p => p.Id == id);
-                var postDto = _mapper.Map<PostDto>(updatedPost);
+                var postDto = _mapper.Map<PostDto>(updatedPost, opts => opts.Items["CurrentUserId"] = userId);
                 
                 return Ok(BaseResponse<PostDto>.SuccessResult(postDto, "Post updated successfully"));
             }
@@ -480,7 +491,10 @@ namespace LostAndFound.Api.Controllers
                     "Owner.UserRoles", 
                     "Owner.UserRoles.Role",
                     "PostImages", 
-                    "Photos");
+                    "Photos",
+                    "Likes",
+                    "Comments",
+                    "Shares");
                 var posts = allPosts.Where(p => p.CreatorId == userId).ToList();
                 var totalCount = posts.Count;
 
@@ -490,7 +504,7 @@ namespace LostAndFound.Api.Controllers
                     .Take(pageSize)
                     .ToList();
 
-                var postDtos = _mapper.Map<List<PostDto>>(pagedPosts);
+                var postDtos = _mapper.Map<List<PostDto>>(pagedPosts, opts => opts.Items["CurrentUserId"] = userId);
 
                 return Ok(BaseResponse<object>.SuccessResult(new
                 {
@@ -516,6 +530,8 @@ namespace LostAndFound.Api.Controllers
         {
             try
             {
+                var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "0");
+                
                 var allPosts = await _unitOfWork.Posts.GetAllWithIncludesAsync(
                     "SubCategory", 
                     "SubCategory.Category", 
@@ -526,7 +542,10 @@ namespace LostAndFound.Api.Controllers
                     "Owner.UserRoles", 
                     "Owner.UserRoles.Role",
                     "PostImages", 
-                    "Photos");
+                    "Photos",
+                    "Likes",
+                    "Comments",
+                    "Shares");
 
                 // Filter only active posts
                 var posts = allPosts.Where(p => p.Status == "Active").ToList();
@@ -539,7 +558,7 @@ namespace LostAndFound.Api.Controllers
                     .Take(pageSize)
                     .ToList();
 
-                var postDtos = _mapper.Map<List<PostDto>>(pagedPosts);
+                var postDtos = _mapper.Map<List<PostDto>>(pagedPosts, opts => opts.Items["CurrentUserId"] = userId);
 
                 return Ok(BaseResponse<object>.SuccessResult(new
                 {
@@ -610,9 +629,12 @@ namespace LostAndFound.Api.Controllers
                     "Owner.UserRoles", 
                     "Owner.UserRoles.Role",
                     "PostImages", 
-                    "Photos");
+                    "Photos",
+                    "Likes",
+                    "Comments",
+                    "Shares");
                 var updatedPost = allPosts.FirstOrDefault(p => p.Id == id);
-                var postDto = _mapper.Map<PostDto>(updatedPost);
+                var postDto = _mapper.Map<PostDto>(updatedPost, opts => opts.Items["CurrentUserId"] = userId);
                 
                 return Ok(BaseResponse<PostDto>.SuccessResult(postDto, "Post status updated successfully"));
             }
