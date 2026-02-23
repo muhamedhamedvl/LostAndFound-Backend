@@ -71,12 +71,8 @@ namespace LostAndFound.Api.Hubs
             var userId = GetCurrentUserId();
             try
             {
-                var messages = await _chatService.SendMessageAsync(sessionId, userId, content);
-                var latestMessage = messages.LastOrDefault();
-                if (latestMessage != null)
-                {
-                    await _chatHubService.NotifyMessageSentAsync(latestMessage);
-                }
+                var sentMessage = await _chatService.SendMessageAsync(sessionId, userId, content);
+                await _chatHubService.NotifyMessageSentAsync(sentMessage);
             }
             catch (Exception ex)
             {

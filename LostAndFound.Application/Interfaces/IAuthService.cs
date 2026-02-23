@@ -7,6 +7,7 @@ namespace LostAndFound.Application.Interfaces
     {
         Task<BaseResponse<AuthResponseDto>> SignupAsync(SignupDto signupDto);
         Task<BaseResponse<AuthResponseDto>> LoginAsync(LoginDto loginDto);
+        Task<BaseResponse<AuthResponseDto>> GoogleSignInAsync(GoogleSignInDto dto);
         Task<BaseResponse> VerifyAccountAsync(VerifyAccountDto verifyAccountDto);
         Task<BaseResponse<AuthResponseDto>> RefreshTokenAsync(RefreshTokenDto refreshTokenDto);
         Task<BaseResponse> ForgotPasswordAsync(ForgotPasswordDto forgotPasswordDto);

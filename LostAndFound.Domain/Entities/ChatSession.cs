@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -12,9 +12,8 @@ namespace LostAndFound.Domain.Entities
         public int User2Id { get; set; }
         public DateTime? LastMessageTime { get; set; }
 
-        public User? User1 { get; set; }
-        public User? User2 { get; set; }
+        public AppUser? User1 { get; set; }
+        public AppUser? User2 { get; set; }
         public ICollection<ChatMessage> Messages { get; set; } = new List<ChatMessage>();
-        public ICollection<ChatParticipant> Participants { get; set; } = new List<ChatParticipant>();
     }
 }

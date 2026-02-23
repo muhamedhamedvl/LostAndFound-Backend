@@ -1,11 +1,14 @@
 using LostAndFound.Application.DTOs.Auth;
 using LostAndFound.Application.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Swashbuckle.AspNetCore.Annotations;
 namespace LostAndFound.Api.Controllers
 {
     [ApiController]
     [Route("api/auth")]
+    [EnableRateLimiting("auth")]
     public class AuthController : ControllerBase
     {
         private readonly IAuthService _authService;
@@ -40,6 +43,23 @@ namespace LostAndFound.Api.Controllers
         public async Task<IActionResult> Login([FromBody] LoginDto loginDto)
         {
             var result = await _authService.LoginAsync(loginDto);
+            
+            if (result.Success)
+            {
+                return Ok(result);
+            }
+            
+            return Unauthorized(result);
+        }
+
+        [HttpPost("google")]
+        [SwaggerOperation(
+            Summary = "Sign in with Google",
+            Description = "Authenticates using a Google ID token (from Google Sign-In on mobile or web). Creates a new user if none exists for this Google account, or links to an existing account by email. Returns the same JWT access token and refresh token as login."
+        )]
+        public async Task<IActionResult> GoogleSignIn([FromBody] GoogleSignInDto dto)
+        {
+            var result = await _authService.GoogleSignInAsync(dto);
             
             if (result.Success)
             {
@@ -124,6 +144,7 @@ namespace LostAndFound.Api.Controllers
         }
 
         [HttpPost("change-password")]
+        [Authorize]
         [SwaggerOperation(
             Summary = "Change password for authenticated user",
             Description = "Allows an authenticated user to change their password by providing the current password and a new password. All active refresh tokens are invalidated for security."
@@ -165,6 +186,7 @@ namespace LostAndFound.Api.Controllers
         }
 
         [HttpPost("logout")]
+        [Authorize]
         [SwaggerOperation(
             Summary = "Logout user and invalidate refresh token",
             Description = "Invalidates the user's refresh token to end the session. Requires authentication."
@@ -189,6 +211,7 @@ namespace LostAndFound.Api.Controllers
         }
 
         [HttpGet("me")]
+        [Authorize]
         [SwaggerOperation(
             Summary = "Get current authenticated user",
             Description = "Returns the profile information of the currently authenticated user. Requires authentication."
@@ -213,6 +236,7 @@ namespace LostAndFound.Api.Controllers
         }
 
         [HttpPost("change-email-request")]
+        [Authorize]
         [SwaggerOperation(
             Summary = "Request email change",
             Description = "Initiates an email change request. A verification code will be sent to the new email address. Requires authentication."
@@ -236,6 +260,7 @@ namespace LostAndFound.Api.Controllers
         }
 
         [HttpPost("change-email-confirm")]
+        [Authorize]
         [SwaggerOperation(
             Summary = "Confirm email change",
             Description = "Confirms the email change using the verification code sent to the new email. All active sessions will be invalidated. Requires authentication."
@@ -259,6 +284,7 @@ namespace LostAndFound.Api.Controllers
         }
 
         [HttpDelete("delete-account")]
+        [Authorize]
         [SwaggerOperation(
             Summary = "Delete user account",
             Description = "Permanently deletes the user's account (soft delete). Requires password confirmation for security. Requires authentication."

@@ -29,6 +29,9 @@ namespace LostAndFound.Application.Features.Users.Queries.GetUserById
                         Email = u.Email,
                         Phone = u.Phone,
                         IsVerified = u.IsVerified,
+                        DateOfBirth = u.DateOfBirth,
+                        Gender = u.Gender,
+                        ProfilePictureUrl = u.ProfilePictureUrl,
                         CreatedAt = u.CreatedAt,
                         UpdatedAt = u.UpdatedAt
                     })

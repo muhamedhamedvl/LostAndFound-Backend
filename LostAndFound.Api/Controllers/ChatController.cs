@@ -7,21 +7,25 @@ using LostAndFound.Application.DTOs.Chat;
 using LostAndFound.Application.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Swashbuckle.AspNetCore.Annotations;
 namespace LostAndFound.Api.Controllers
 {
     [ApiController]
     [Route("api/chat")]
     [Authorize]
+    [EnableRateLimiting("api")]
     public class ChatController : ControllerBase
     {
         private readonly IChatService _chatService;
         private readonly IChatHubService _chatHubService;
+        private readonly INotificationService _notificationService;
 
-        public ChatController(IChatService chatService, IChatHubService chatHubService)
+        public ChatController(IChatService chatService, IChatHubService chatHubService, INotificationService notificationService)
         {
             _chatService = chatService;
             _chatHubService = chatHubService;
+            _notificationService = notificationService;
         }
 
         [HttpGet("sessions")]
@@ -158,15 +162,21 @@ namespace LostAndFound.Api.Controllers
                 }
 
                 var userId = GetCurrentUserId();
-                var messages = await _chatService.SendMessageAsync(sessionId, userId, request.Text);
-                var latestMessage = messages.LastOrDefault();
+                var sentMessage = await _chatService.SendMessageAsync(sessionId, userId, request.Text);
 
-                if (latestMessage != null)
+                await _chatHubService.NotifyMessageSentAsync(sentMessage);
+                    
+                // Send push notification for new message
+                if (sentMessage.ReceiverId != userId && sentMessage.Sender != null)
                 {
-                    await _chatHubService.NotifyMessageSentAsync(latestMessage);
+                    await _notificationService.NotifyNewMessageAsync(
+                        sentMessage.ReceiverId,
+                        userId,
+                        sentMessage.Sender.FullName,
+                        sessionId);
                 }
 
-                return Ok(BaseResponse<IEnumerable<ChatMessageDto>>.SuccessResult(messages, "Message sent successfully."));
+                return Ok(BaseResponse<ChatMessageDto>.SuccessResult(sentMessage, "Message sent successfully."));
             }
             catch (ArgumentException ex)
             {

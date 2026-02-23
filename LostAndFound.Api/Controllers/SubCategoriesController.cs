@@ -1,17 +1,19 @@
 using AutoMapper;
 using LostAndFound.Application.Common;
 using LostAndFound.Application.DTOs.Category;
-using LostAndFound.Application.DTOs.Post;
+using LostAndFound.Application.DTOs.Report;
 using LostAndFound.Application.Interfaces;
 using LostAndFound.Domain.Entities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Swashbuckle.AspNetCore.Annotations;
 namespace LostAndFound.Api.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
     [Authorize]
+    [EnableRateLimiting("api")]
     public class SubCategoriesController : ControllerBase
     {
         private readonly IUnitOfWork _unitOfWork;
@@ -88,12 +90,12 @@ namespace LostAndFound.Api.Controllers
             }
         }
 
-        [HttpGet("{id}/posts")]
+        [HttpGet("{id}/reports")]
         [SwaggerOperation(
-            Summary = "Get posts by subcategory",
-            Description = "Retrieves all posts that belong to the specified subcategory. Requires authentication."
+            Summary = "Get reports by subcategory",
+            Description = "Retrieves all reports that belong to the specified subcategory. Requires authentication."
         )]
-        public async Task<IActionResult> GetSubCategoryPosts(int id)
+        public async Task<IActionResult> GetSubCategoryReports(int id)
         {
             try
             {
@@ -104,15 +106,15 @@ namespace LostAndFound.Api.Controllers
                     return NotFound(BaseResponse<object>.FailureResult("SubCategory not found"));
                 }
 
-                var posts = await _unitOfWork.Posts.GetAllWithIncludesAsync("SubCategory", "SubCategory.Category", "Creator", "PostImages", "Owner");
-                var filteredPosts = posts.Where(p => p.SubCategoryId == id).ToList();
+                var reports = await _unitOfWork.Reports.GetAllWithIncludesAsync("SubCategory", "SubCategory.Category", "CreatedBy", "Images");
+                var filteredReports = reports.Where(r => r.SubCategoryId == id).ToList();
                 
-                var postDtos = _mapper.Map<IEnumerable<PostDto>>(filteredPosts);
-                return Ok(BaseResponse<IEnumerable<PostDto>>.SuccessResult(postDtos, $"Posts for subcategory '{subCategory.Name}' retrieved successfully"));
+                var reportDtos = _mapper.Map<IEnumerable<ReportDto>>(filteredReports);
+                return Ok(BaseResponse<IEnumerable<ReportDto>>.SuccessResult(reportDtos, $"Reports for subcategory '{subCategory.Name}' retrieved successfully"));
             }
             catch (Exception ex)
             {
-                return StatusCode(500, BaseResponse<object>.FailureResult($"Error retrieving subcategory posts: {ex.Message}"));
+                return StatusCode(500, BaseResponse<object>.FailureResult($"Error retrieving subcategory reports: {ex.Message}"));
             }
         }
 
@@ -214,11 +216,11 @@ namespace LostAndFound.Api.Controllers
                     return NotFound(BaseResponse<object>.FailureResult("SubCategory not found"));
                 }
 
-                // Check if subcategory has posts
-                var posts = await _unitOfWork.Posts.FindAsync(p => p.SubCategoryId == id);
-                if (posts.Any())
+                // Check if subcategory has reports
+                var reports = await _unitOfWork.Reports.FindAsync(r => r.SubCategoryId == id);
+                if (reports.Any())
                 {
-                    return BadRequest(BaseResponse<object>.FailureResult("Cannot delete subcategory that has posts. Please delete or reassign posts first."));
+                    return BadRequest(BaseResponse<object>.FailureResult("Cannot delete subcategory that has reports. Please delete or reassign reports first."));
                 }
 
                 await _unitOfWork.SubCategories.DeleteAsync(subCategory);

@@ -71,7 +71,9 @@ namespace LostAndFound.Application.Services
 
             try
             {
-                return await Task.FromResult(refreshToken.Length > 20);
+                // Validate that it's a proper Base64 string (64 bytes = 88 Base64 chars)
+                var bytes = Convert.FromBase64String(refreshToken);
+                return await Task.FromResult(bytes.Length == 64);
             }
             catch
             {

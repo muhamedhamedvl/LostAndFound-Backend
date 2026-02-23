@@ -22,9 +22,13 @@ namespace LostAndFound.Application.Validators
     {
         public SignupDtoValidator()
         {
-            RuleFor(x => x.FullName)
-                .NotEmpty().WithMessage("Full name is required")
-                .MaximumLength(100).WithMessage("Full name cannot exceed 100 characters");
+            RuleFor(x => x.FirstName)
+                .NotEmpty().WithMessage("First name is required")
+                .MaximumLength(50).WithMessage("First name cannot exceed 50 characters");
+
+            RuleFor(x => x.LastName)
+                .NotEmpty().WithMessage("Last name is required")
+                .MaximumLength(50).WithMessage("Last name cannot exceed 50 characters");
 
             RuleFor(x => x.Email)
                 .NotEmpty().WithMessage("Email is required")

@@ -1,32 +1,21 @@
-// Code written by Mohamed Hamed Mohamed
-
 using AutoMapper;
+using LostAndFound.Application.DTOs.Auth;
 using LostAndFound.Application.DTOs.Category;
 using LostAndFound.Application.DTOs.Chat;
-using LostAndFound.Application.DTOs.Item;
-using LostAndFound.Application.DTOs.Post;
-using LostAndFound.Application.DTOs.Location;
 using LostAndFound.Application.DTOs.Notification;
-using LostAndFound.Application.DTOs.Auth;
+using LostAndFound.Application.DTOs.Report;
 using LostAndFound.Domain.Entities;
+using LostAndFound.Domain.Enums;
 using System.Collections.Generic;
 using System.Linq;
 
 namespace LostAndFound.Application.Mapping
 {
-    /// <summary>
-    /// AutoMapper profile for configuring entity-to-DTO mappings.
-    /// Defines all mapping configurations between domain entities and DTOs.
-    /// </summary>
     public class MappingProfile : Profile
     {
-        /// <summary>
-        /// Initializes mapping configurations for all entities and DTOs.
-        /// Configures bidirectional mappings where applicable.
-        /// </summary>
         public MappingProfile()
         {
-            // User mappings
+            // ── User mappings ──
             CreateMap<User, UserDto>()
                 .ForMember(dest => dest.Roles, opt => opt.MapFrom(src => src.UserRoles != null && src.UserRoles.Any()
                     ? src.UserRoles.Select(ur => ur.Role != null ? ur.Role.Name : string.Empty).Where(r => !string.IsNullOrEmpty(r)).ToList()
@@ -35,17 +24,17 @@ namespace LostAndFound.Application.Mapping
                 .ForMember(dest => dest.DateOfBirth, opt => opt.MapFrom(src => src.DateOfBirth))
                 .ForMember(dest => dest.Gender, opt => opt.MapFrom(src => src.Gender));
             CreateMap<SignupDto, User>()
+                .ForMember(dest => dest.FullName, opt => opt.MapFrom(src => $"{src.FirstName.Trim()} {src.LastName.Trim()}".Trim()))
                 .ForMember(dest => dest.PasswordHash, opt => opt.Ignore())
                 .ForMember(dest => dest.CreatedAt, opt => opt.MapFrom(src => DateTime.UtcNow))
-                .ForMember(dest => dest.IsVerified, opt => opt.MapFrom(src => false));
+                .ForMember(dest => dest.IsVerified, opt => opt.MapFrom(src => false))
+                .ForMember(dest => dest.DateOfBirth, opt => opt.MapFrom(src => src.DateOfBirth))
+                .ForMember(dest => dest.Gender, opt => opt.MapFrom(src => src.Gender));
 
-            // Category mappings
-            // CategoryDto: Flat DTO without SubCategories (for lightweight list endpoints)
+            // ── Category mappings ──
             CreateMap<Category, CategoryDto>()
-                .ForMember(dest => dest.SubCategoryCount, opt => opt.MapFrom(src => 
+                .ForMember(dest => dest.SubCategoryCount, opt => opt.MapFrom(src =>
                     src.SubCategories != null && src.SubCategories.Any() ? src.SubCategories.Count : 0));
-            
-            // CategoryTreeDto: Full hierarchical DTO with SubCategories (for tree endpoints)
             CreateMap<Category, CategoryTreeDto>()
                 .ForMember(dest => dest.SubCategories, opt => opt.MapFrom(src => src.SubCategories));
             CreateMap<CreateCategoryDto, Category>()
@@ -55,94 +44,55 @@ namespace LostAndFound.Application.Mapping
                 .ForMember(dest => dest.UpdatedAt, opt => opt.MapFrom(src => DateTime.UtcNow))
                 .ForMember(dest => dest.SubCategories, opt => opt.Ignore());
 
-            // SubCategory mappings
+            // ── SubCategory mappings ──
             CreateMap<SubCategory, SubCategoryDto>()
                 .ForMember(dest => dest.CategoryName, opt => opt.MapFrom(src => src.Category.Name))
-                .ForMember(dest => dest.PostCount, opt => opt.MapFrom(src => src.Posts.Count));
+                .ForMember(dest => dest.ReportCount, opt => opt.MapFrom(src => src.Reports.Count));
             CreateMap<CreateSubCategoryDto, SubCategory>()
                 .ForMember(dest => dest.CreatedAt, opt => opt.MapFrom(src => DateTime.UtcNow))
                 .ForMember(dest => dest.Category, opt => opt.Ignore())
-                .ForMember(dest => dest.Posts, opt => opt.Ignore());
+                .ForMember(dest => dest.Reports, opt => opt.Ignore());
             CreateMap<UpdateSubCategoryDto, SubCategory>()
                 .ForMember(dest => dest.UpdatedAt, opt => opt.MapFrom(src => DateTime.UtcNow))
                 .ForMember(dest => dest.Category, opt => opt.Ignore())
-                .ForMember(dest => dest.Posts, opt => opt.Ignore());
+                .ForMember(dest => dest.Reports, opt => opt.Ignore());
 
-            // Location mappings
-            //CreateMap<Location, LocationDto>();
-            //CreateMap<CreateLocationDto, Location>()
-            //    .ForMember(dest => dest.CreatedAt, opt => opt.MapFrom(src => DateTime.UtcNow));
-            //CreateMap<UpdateLocationDto, Location>()
-            //    .ForMember(dest => dest.UpdatedAt, opt => opt.MapFrom(src => DateTime.UtcNow));
+            // ── Report mappings ──
+            CreateMap<Report, ReportDto>()
+                .ForMember(dest => dest.Type, opt => opt.MapFrom(src => src.Type.ToString()))
+                .ForMember(dest => dest.Status, opt => opt.MapFrom(src => src.Status.ToString()))
+                .ForMember(dest => dest.LifecycleStatus, opt => opt.MapFrom(src => src.LifecycleStatus.ToString()))
+                .ForMember(dest => dest.SubCategoryName, opt => opt.MapFrom(src => src.SubCategory != null ? src.SubCategory.Name : null))
+                .ForMember(dest => dest.CategoryName, opt => opt.MapFrom(src => src.SubCategory != null && src.SubCategory.Category != null ? src.SubCategory.Category.Name : null))
+                .ForMember(dest => dest.CreatedByName, opt => opt.MapFrom(src => src.CreatedBy != null ? src.CreatedBy.FullName : null))
+                .ForMember(dest => dest.CreatedByProfilePictureUrl, opt => opt.MapFrom(src => src.CreatedBy != null ? src.CreatedBy.ProfilePictureUrl : null))
+                .ForMember(dest => dest.DateReported, opt => opt.MapFrom(src => src.DateReported))
+                .ForMember(dest => dest.Images, opt => opt.MapFrom(src => src.Images));
 
-            // Post mappings
-            CreateMap<Post, PostDto>()
-                .ForMember(dest => dest.SubCategory, opt => opt.MapFrom(src => src.SubCategory))
-                .ForMember(dest => dest.CategoryId, opt => opt.MapFrom(src => src.SubCategory != null ? src.SubCategory.CategoryId : 0))
-                .ForMember(dest => dest.Content, opt => opt.MapFrom(src => src.Content))
-                .ForMember(dest => dest.CategoryName, opt => opt.MapFrom(src => src.SubCategory != null && src.SubCategory.Category != null ? src.SubCategory.Category.Name : string.Empty))
-                .ForMember(dest => dest.Reward, opt => opt.MapFrom(src => src.RewardAmount.HasValue
-                    ? src.RewardAmount.Value - (src.PlatformFeeAmount ?? 0m)
-                    : (decimal?)null))
-                // Map Photos from Post entity to PostDto
-                .ForMember(dest => dest.Photos, opt => opt.MapFrom(src => src.Photos != null && src.Photos.Any() 
-                    ? src.Photos.Select(p => new PhotoDto
-                    {
-                        Id = p.Id,
-                        Url = p.Url,
-                        PublicId = p.PublicId,
-                        PostId = p.PostId,
-                        UploadedAt = p.UploadedAt
-                    }).ToList()
-                    : new List<PhotoDto>()))
-                // Map social features counts
-                .ForMember(dest => dest.LikesCount, opt => opt.MapFrom(src => src.Likes != null ? src.Likes.Count : 0))
-                .ForMember(dest => dest.CommentsCount, opt => opt.MapFrom(src => src.Comments != null ? src.Comments.Count : 0))
-                .ForMember(dest => dest.SharesCount, opt => opt.MapFrom(src => src.Shares != null ? src.Shares.Count : 0))
-                // Map IsLikedByCurrentUser - requires current userId from context
-                .ForMember(dest => dest.IsLikedByCurrentUser, opt => opt.MapFrom((src, dest, destMember, context) =>
-                {
-                    // Try to get current userId from mapping context
-                    if (context.Items.TryGetValue("CurrentUserId", out var userIdObj) && userIdObj is int userId)
-                    {
-                        return src.Likes != null && src.Likes.Any(l => l.UserId == userId);
-                    }
-                    return false;
-                }));
-
-
-            CreateMap<CreatePostDto, Post>()
+            CreateMap<CreateReportDto, Report>()
+                .ForMember(dest => dest.Type, opt => opt.MapFrom(src => Enum.Parse<ReportType>(src.Type, true)))
+                .ForMember(dest => dest.Status, opt => opt.MapFrom(src => ReportStatus.Open))
+                .ForMember(dest => dest.DateReported, opt => opt.MapFrom(src => src.DateReported))
                 .ForMember(dest => dest.CreatedAt, opt => opt.MapFrom(src => DateTime.UtcNow))
-                .ForMember(dest => dest.Status, opt => opt.MapFrom(src => "Active"))
-                .ForMember(dest => dest.CreatorId, opt => opt.Ignore()) 
+                .ForMember(dest => dest.CreatedById, opt => opt.Ignore())
+                .ForMember(dest => dest.CreatedBy, opt => opt.Ignore())
                 .ForMember(dest => dest.SubCategory, opt => opt.Ignore())
-                .ForMember(dest => dest.Creator, opt => opt.Ignore())
-                .ForMember(dest => dest.RewardAmount, opt => opt.Ignore())
-                .ForMember(dest => dest.PlatformFeeAmount, opt => opt.Ignore())
-                .ForMember(dest => dest.Photos, opt => opt.Ignore()) 
-                .ForMember(dest => dest.PostImages, opt => opt.Ignore()) 
-                .ForMember(dest => dest.ResolvedByUser, opt => opt.Ignore());
+                .ForMember(dest => dest.Images, opt => opt.Ignore());
 
-            CreateMap<UpdatePostDto, Post>()
-                .ForMember(dest => dest.UpdatedAt, opt => opt.MapFrom(src => DateTime.UtcNow))
-                .ForMember(dest => dest.CreatedAt, opt => opt.Ignore())
-                .ForMember(dest => dest.CreatorId, opt => opt.Ignore())
-                .ForMember(dest => dest.RewardAmount, opt => opt.Ignore())
-                .ForMember(dest => dest.PlatformFeeAmount, opt => opt.Ignore());
+            CreateMap<ReportImage, ReportImageDto>();
 
-            // Photo mappings
-            CreateMap<Photo, PhotoDto>();
-            CreateMap<PhotoDto, Photo>();
-
-            // Reward mappings
-            CreateMap<Reward, DTOs.Item.RewardDto>();
-            CreateMap<DTOs.Item.RewardDto, Reward>();
-
-            // Chat Session mappings
+            // ── Chat Session mappings ──
             CreateMap<ChatSession, ChatSessionDetailsDto>();
-
-            // Chat Message mappings
             CreateMap<ChatMessage, ChatMessageDto>();
+
+            // ── Notification mappings ──
+            CreateMap<Notification, NotificationDto>()
+                .ForMember(dest => dest.Title, opt => opt.MapFrom(src => !string.IsNullOrEmpty(src.Title) ? src.Title : src.Type))
+                .ForMember(dest => dest.Message, opt => opt.MapFrom(src => src.Content))
+                .ForMember(dest => dest.NotificationType, opt => opt.MapFrom(src => src.Type))
+                .ForMember(dest => dest.ActorName, opt => opt.MapFrom(src => src.Actor != null ? src.Actor.FullName : null))
+                .ForMember(dest => dest.ActorProfilePictureUrl, opt => opt.MapFrom(src => src.Actor != null ? src.Actor.ProfilePictureUrl : null))
+                .ForMember(dest => dest.RelatedReportId, opt => opt.MapFrom(src => src.ReportId));
         }
     }
 }

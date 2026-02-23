@@ -7,9 +7,8 @@ namespace LostAndFound.Domain.Entities
     {
         public string Name { get; set; } = string.Empty;
         public string? Description { get; set; }
-        public int CategoryId { get; set; } // Foreign key to Category (Main Category)
+        public int CategoryId { get; set; }
         public Category Category { get; set; } = null!;
-        public ICollection<Post> Posts { get; set; } = new List<Post>();
+        public ICollection<Report> Reports { get; set; } = new List<Report>();
     }
 }
-

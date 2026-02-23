@@ -159,7 +159,7 @@ namespace LostAndFound.Application.Services
             return _mapper.Map<IEnumerable<ChatMessageDto>>(messages);
         }
 
-        public async Task<IEnumerable<ChatMessageDto>> SendMessageAsync(int sessionId, int senderId, string text)
+        public async Task<ChatMessageDto> SendMessageAsync(int sessionId, int senderId, string text)
         {
             if (string.IsNullOrWhiteSpace(text))
             {
@@ -194,7 +194,15 @@ namespace LostAndFound.Application.Services
 
             await _unitOfWork.SaveChangesAsync();
 
-            return await GetMessagesAsync(sessionId, senderId);
+            // Load the sent message with Sender/Receiver for the response
+            var sentMessage = await _unitOfWork.ChatMessages
+                .GetQueryable()
+                .Include(m => m.Sender)
+                .Include(m => m.Receiver)
+                .AsNoTracking()
+                .FirstAsync(m => m.Id == message.Id);
+
+            return _mapper.Map<ChatMessageDto>(sentMessage);
         }
 
         public async Task<ChatMessageDto> MarkMessageAsReadAsync(int messageId, int userId)

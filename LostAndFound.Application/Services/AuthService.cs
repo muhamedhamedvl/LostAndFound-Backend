@@ -1,9 +1,11 @@
+using Google.Apis.Auth;
 using LostAndFound.Application.Common;
 using LostAndFound.Application.DTOs.Auth;
 using LostAndFound.Application.Interfaces;
 using LostAndFound.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using System.Security.Cryptography;
 
 namespace LostAndFound.Application.Services
 {
@@ -26,31 +28,21 @@ namespace LostAndFound.Application.Services
         {
             try
             {
-                Console.WriteLine($"[DEBUG] Login attempt for email: {loginDto.Email}");
-                
                 var user = await _unitOfWork.Users.GetQueryable()
                     .Where(u => u.Email == loginDto.Email)
                     .Include(u => u.UserRoles)
                         .ThenInclude(ur => ur.Role)
                     .FirstOrDefaultAsync();
 
-                Console.WriteLine($"[DEBUG] User found: {user != null}");
-                if (user != null)
-                {
-                    Console.WriteLine($"[DEBUG] User ID: {user.Id}");
-                    Console.WriteLine($"[DEBUG] User Email: {user.Email}");
-                    Console.WriteLine($"[DEBUG] User IsVerified: {user.IsVerified}");
-                    Console.WriteLine($"[DEBUG] Password Hash (first 30 chars): {user.PasswordHash?.Substring(0, Math.Min(30, user.PasswordHash.Length))}...");
-                    Console.WriteLine($"[DEBUG] Attempting BCrypt verification...");
-                    
-                    bool passwordValid = BCrypt.Net.BCrypt.Verify(loginDto.Password, user.PasswordHash);
-                    Console.WriteLine($"[DEBUG] BCrypt verification result: {passwordValid}");
-                }
-
                 if (user == null || !BCrypt.Net.BCrypt.Verify(loginDto.Password, user.PasswordHash))
                 {
-                    Console.WriteLine($"[DEBUG] Login failed - Invalid credentials");
                     return BaseResponse<AuthResponseDto>.FailureResult("Invalid email or password");
+                }
+
+                // Prevent deleted users from logging in
+                if (user.IsDeleted)
+                {
+                    return BaseResponse<AuthResponseDto>.FailureResult("This account has been deleted");
                 }
 
                 if (!user.IsVerified)
@@ -87,6 +79,123 @@ namespace LostAndFound.Application.Services
             }
         }
 
+        public async Task<BaseResponse<AuthResponseDto>> GoogleSignInAsync(GoogleSignInDto dto)
+        {
+            try
+            {
+                // Support both Google:ClientId and GoogleAuth:ClientId (legacy) for config flexibility
+                var clientId = _configuration["Google:ClientId"] ?? _configuration["GoogleAuth:ClientId"];
+                if (string.IsNullOrEmpty(clientId))
+                {
+                    return BaseResponse<AuthResponseDto>.FailureResult("Google sign-in is not configured");
+                }
+
+                GoogleJsonWebSignature.Payload payload;
+                try
+                {
+                    var validationSettings = new GoogleJsonWebSignature.ValidationSettings
+                    {
+                        Audience = new[] { clientId }
+                    };
+                    payload = await GoogleJsonWebSignature.ValidateAsync(dto.IdToken, validationSettings);
+                }
+                catch (InvalidJwtException)
+                {
+                    return BaseResponse<AuthResponseDto>.FailureResult("Invalid Google ID token");
+                }
+
+                var googleId = payload.Subject;
+                var email = payload.Email;
+                var name = payload.Name ?? (payload.GivenName != null && payload.FamilyName != null
+                    ? $"{payload.GivenName} {payload.FamilyName}".Trim()
+                    : payload.Email ?? "User");
+                var picture = payload.Picture;
+
+                var user = await _unitOfWork.Users.GetQueryable()
+                    .Where(u => u.GoogleId == googleId || u.Email == email)
+                    .Include(u => u.UserRoles)
+                        .ThenInclude(ur => ur.Role)
+                    .FirstOrDefaultAsync();
+
+                if (user != null)
+                {
+                    if (user.IsDeleted)
+                    {
+                        return BaseResponse<AuthResponseDto>.FailureResult("This account has been deleted");
+                    }
+                    // Link Google account if they signed up with email first
+                    if (string.IsNullOrEmpty(user.GoogleId))
+                    {
+                        user.GoogleId = googleId;
+                        if (string.IsNullOrEmpty(user.ProfilePictureUrl) && !string.IsNullOrEmpty(picture))
+                            user.ProfilePictureUrl = picture;
+                        user.UpdatedAt = DateTime.UtcNow;
+                        await _unitOfWork.SaveChangesAsync();
+                    }
+                }
+                else
+                {
+                    user = new AppUser
+                    {
+                        GoogleId = googleId,
+                        FullName = name,
+                        Email = email ?? throw new InvalidOperationException("Google payload missing email"),
+                        PasswordHash = BCrypt.Net.BCrypt.HashPassword(Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))),
+                        Phone = string.Empty,
+                        IsVerified = true,
+                        ProfilePictureUrl = picture,
+                        CreatedAt = DateTime.UtcNow
+                    };
+                    await _unitOfWork.Users.AddAsync(user);
+                    await _unitOfWork.SaveChangesAsync();
+
+                    var userRole = await _unitOfWork.Roles.FirstOrDefaultAsync(r => r.Name == "User");
+                    if (userRole != null)
+                    {
+                        await _unitOfWork.UserRoles.AddAsync(new UserRole
+                        {
+                            UserId = user.Id,
+                            RoleId = userRole.Id,
+                            CreatedAt = DateTime.UtcNow
+                        });
+                        await _unitOfWork.SaveChangesAsync();
+                    }
+
+                    user = await _unitOfWork.Users.GetQueryable()
+                        .Where(u => u.Id == user.Id)
+                        .Include(u => u.UserRoles)
+                            .ThenInclude(ur => ur.Role)
+                        .FirstOrDefaultAsync() ?? user;
+                }
+
+                var userDto = MapToUserDto(user);
+                var accessToken = await _jwtService.GenerateAccessTokenAsync(userDto);
+                var refreshToken = await _jwtService.GenerateRefreshTokenAsync();
+
+                user.RefreshToken = refreshToken;
+                user.RefreshTokenExpiry = DateTime.UtcNow.AddDays(7);
+                await _unitOfWork.SaveChangesAsync();
+
+                var jwtSettings = _configuration.GetSection("JwtSettings");
+                var expiryMinutes = int.Parse(jwtSettings["ExpiryMinutes"] ?? "60");
+                var expiresAt = DateTime.UtcNow.AddMinutes(expiryMinutes);
+
+                var authResponse = new AuthResponseDto
+                {
+                    User = userDto,
+                    AccessToken = accessToken,
+                    RefreshToken = refreshToken,
+                    ExpiresAt = expiresAt
+                };
+
+                return BaseResponse<AuthResponseDto>.SuccessResult(authResponse, "Signed in with Google successfully");
+            }
+            catch (Exception ex)
+            {
+                return BaseResponse<AuthResponseDto>.FailureResult($"Google sign-in failed: {ex.Message}");
+            }
+        }
+
         public async Task<BaseResponse<AuthResponseDto>> SignupAsync(SignupDto signupDto)
         {
             try
@@ -98,16 +207,18 @@ namespace LostAndFound.Application.Services
                 }
 
                 var verificationCode = GenerateVerificationCode();
-                var user = new User
+                var user = new AppUser
                 {
-                    FullName = signupDto.FullName,
+                    FullName = $"{signupDto.FirstName.Trim()} {signupDto.LastName.Trim()}".Trim(),
                     Email = signupDto.Email,
                     Phone = signupDto.Phone ?? string.Empty,
                     PasswordHash = BCrypt.Net.BCrypt.HashPassword(signupDto.Password),
                     IsVerified = false,
                     VerificationCode = verificationCode,
                     VerificationCodeExpiry = DateTime.UtcNow.AddHours(24),
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = DateTime.UtcNow,
+                    DateOfBirth = signupDto.DateOfBirth,
+                    Gender = signupDto.Gender
                 };
 
                 await _unitOfWork.Users.AddAsync(user);
@@ -525,7 +636,7 @@ namespace LostAndFound.Application.Services
             }
         }
 
-        private UserDto MapToUserDto(User user)
+        private UserDto MapToUserDto(AppUser user)
         {
             return new UserDto
             {
@@ -535,6 +646,9 @@ namespace LostAndFound.Application.Services
                 Phone = user.Phone,
                 IsVerified = user.IsVerified,
                 Roles = user.UserRoles?.Select(ur => ur.Role.Name).ToList() ?? new List<string>(),
+                DateOfBirth = user.DateOfBirth,
+                Gender = user.Gender,
+                ProfilePictureUrl = user.ProfilePictureUrl,
                 CreatedAt = user.CreatedAt,
                 UpdatedAt = user.UpdatedAt
             };
@@ -542,8 +656,7 @@ namespace LostAndFound.Application.Services
 
         private string GenerateVerificationCode()
         {
-            var random = new Random();
-            return random.Next(100000, 999999).ToString();
+            return RandomNumberGenerator.GetInt32(100000, 1000000).ToString();
         }
     }
 }

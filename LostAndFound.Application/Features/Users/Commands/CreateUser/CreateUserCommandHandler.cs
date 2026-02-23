@@ -24,7 +24,7 @@ namespace LostAndFound.Application.Features.Users.Commands.CreateUser
                 {
                     return BaseResponse<UserDto>.FailureResult("User with this email already exists");
                 }
-                var user = new User
+                var user = new AppUser
                 {
                     FullName = request.FullName,
                     Email = request.Email,

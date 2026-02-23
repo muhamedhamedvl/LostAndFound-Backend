@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -17,7 +17,7 @@ namespace LostAndFound.Domain.Entities
         public bool IsRead { get; set; } = false;
 
         public ChatSession? ChatSession { get; set; }
-        public User? Sender { get; set; }
-        public User? Receiver { get; set; }
+        public AppUser? Sender { get; set; }
+        public AppUser? Receiver { get; set; }
     }
 }

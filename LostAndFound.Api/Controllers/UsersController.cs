@@ -3,7 +3,7 @@ using LostAndFound.Application.Common;
 using LostAndFound.Application.DTOs.Common;
 using LostAndFound.Application.DTOs.User;
 using LostAndFound.Application.DTOs.Auth;
-using LostAndFound.Application.DTOs.Post;
+using LostAndFound.Application.DTOs.Report;
 using LostAndFound.Application.Features.Users.Commands.CreateAdmin;
 using LostAndFound.Application.Features.Users.Queries.GetAllUsers;
 using LostAndFound.Application.Features.Users.Queries.GetUserById;
@@ -11,7 +11,7 @@ using LostAndFound.Application.Interfaces;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using System.IO;
+using Microsoft.AspNetCore.RateLimiting;
 using System.Security.Claims;
 using Swashbuckle.AspNetCore.Annotations;
 namespace LostAndFound.Api.Controllers
@@ -22,19 +22,26 @@ namespace LostAndFound.Api.Controllers
     [ApiController]
     [Route("api/[controller]")]
     [Authorize]
+    [EnableRateLimiting("api")]
     public class UsersController : ControllerBase
     {
         private readonly IMediator _mediator;
         private readonly IAuthService _authService;
         private readonly IUnitOfWork _unitOfWork;
         private readonly IMapper _mapper;
+        private readonly IImageService _imageService;
+        private readonly IReportService _reportService;
+        private readonly ISavedReportService _savedReportService;
 
-        public UsersController(IMediator mediator, IAuthService authService, IUnitOfWork unitOfWork, IMapper mapper)
+        public UsersController(IMediator mediator, IAuthService authService, IUnitOfWork unitOfWork, IMapper mapper, IImageService imageService, IReportService reportService, ISavedReportService savedReportService)
         {
             _mediator = mediator;
             _authService = authService;
             _unitOfWork = unitOfWork;
             _mapper = mapper;
+            _imageService = imageService;
+            _reportService = reportService;
+            _savedReportService = savedReportService;
         }
 
         [HttpGet]
@@ -145,6 +152,9 @@ namespace LostAndFound.Api.Controllers
                 Email = user.Email,
                 Phone = user.Phone,
                 IsVerified = user.IsVerified,
+                DateOfBirth = user.DateOfBirth,
+                Gender = user.Gender,
+                ProfilePictureUrl = user.ProfilePictureUrl,
                 CreatedAt = user.CreatedAt,
                 UpdatedAt = user.UpdatedAt
             };
@@ -175,8 +185,47 @@ namespace LostAndFound.Api.Controllers
             return BadRequest(result);
         }
 
+        [HttpPut("{id}/verify")]
+        [Authorize(Roles = "Admin")]
+        [SwaggerOperation(
+            Summary = "Verify a user account",
+            Description = "Allows an Admin to manually verify a user's account. Sets the user's verification status to true. Requires Admin role."
+        )]
+        [ProducesResponseType(typeof(BaseResponse<object>), 200)]
+        [ProducesResponseType(401)]
+        [ProducesResponseType(403)]
+        [ProducesResponseType(404)]
+        public async Task<IActionResult> VerifyUser(int id)
+        {
+            try
+            {
+                var user = await _unitOfWork.Users.GetByIdAsync(id);
+                if (user == null)
+                {
+                    return NotFound(BaseResponse<object>.FailureResult("User not found"));
+                }
+
+                if (user.IsVerified)
+                {
+                    return Ok(BaseResponse<object>.SuccessResult(new { user.Id, user.Email, user.IsVerified }, "User is already verified"));
+                }
+
+                user.IsVerified = true;
+                user.UpdatedAt = DateTime.UtcNow;
+                await _unitOfWork.Users.UpdateAsync(user);
+                await _unitOfWork.SaveChangesAsync();
+
+                return Ok(BaseResponse<object>.SuccessResult(new { user.Id, user.Email, user.IsVerified }, "User verified successfully"));
+            }
+            catch (Exception)
+            {
+                return StatusCode(500, BaseResponse<object>.FailureResult("An error occurred while verifying the user"));
+            }
+        }
+
         [HttpPut("me")]
         [Consumes("multipart/form-data")]
+        [EnableRateLimiting("upload")]
         [SwaggerOperation(
             Summary = "Update my data",
             Description = "Updates the authenticated user's profile information including name, phone, date of birth, gender, and profile picture. Accepts multipart/form-data. Requires authentication."
@@ -231,38 +280,23 @@ namespace LostAndFound.Api.Controllers
                     }
                 }
 
-                // Handle profile picture upload if provided
+                // Handle profile picture upload if provided (via IImageService)
+                const long profilePictureMaxBytes = 2 * 1024 * 1024;
                 if (updateProfileDto.ProfilePicture != null && updateProfileDto.ProfilePicture.Length > 0)
                 {
-                    // Validate file type
-                    var allowedExtensions = new[] { ".jpg", ".jpeg", ".png", ".gif", ".webp" };
-                    var fileExtension = Path.GetExtension(updateProfileDto.ProfilePicture.FileName).ToLowerInvariant();
-                    if (!allowedExtensions.Contains(fileExtension))
+                    var (isValid, errorMessage) = _imageService.ValidateImage(updateProfileDto.ProfilePicture, profilePictureMaxBytes);
+                    if (!isValid)
                     {
-                        return BadRequest(BaseResponse<SafeUserDto>.FailureResult("Invalid file type. Allowed: .jpg, .jpeg, .png, .gif, .webp"));
+                        return BadRequest(BaseResponse<SafeUserDto>.FailureResult(errorMessage ?? "Invalid image"));
                     }
 
-                    if (updateProfileDto.ProfilePicture.Length > 2 * 1024 * 1024)
+                    // Delete old profile picture from disk
+                    if (!string.IsNullOrWhiteSpace(user.ProfilePictureUrl))
                     {
-                        return BadRequest(BaseResponse<SafeUserDto>.FailureResult("File size exceeds 2MB limit"));
+                        await _imageService.DeleteImageAsync(user.ProfilePictureUrl);
                     }
 
-                    var uploadsPath = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "uploads", "profile-pictures");
-                    if (!Directory.Exists(uploadsPath))
-                    {
-                        Directory.CreateDirectory(uploadsPath);
-                    }
-
-                    var fileName = $"{Guid.NewGuid()}{fileExtension}";
-                    var filePath = Path.Combine(uploadsPath, fileName);
-
-                    using (var stream = new FileStream(filePath, FileMode.Create))
-                    {
-                        await updateProfileDto.ProfilePicture.CopyToAsync(stream);
-                    }
-
-                    var profilePictureUrl = $"/uploads/profile-pictures/{fileName}";
-                    user.ProfilePictureUrl = profilePictureUrl;
+                    user.ProfilePictureUrl = await _imageService.SaveImageAsync(updateProfileDto.ProfilePicture, $"profiles/{userId}", profilePictureMaxBytes);
                 }
 
                 user.UpdatedAt = DateTime.UtcNow;
@@ -285,14 +319,15 @@ namespace LostAndFound.Api.Controllers
 
                 return Ok(BaseResponse<SafeUserDto>.SuccessResult(safeUser, "Profile updated successfully"));
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                return StatusCode(500, BaseResponse<SafeUserDto>.FailureResult($"Error updating profile: {ex.Message}"));
+                return StatusCode(500, BaseResponse<SafeUserDto>.FailureResult("An error occurred while updating the profile"));
             }
         }
 
         [HttpPost("me/profile-picture")]
         [Consumes("multipart/form-data")]
+        [EnableRateLimiting("upload")]
         [SwaggerOperation(
             Summary = "Upload profile picture",
             Description = "Uploads a profile picture for the authenticated user. Accepts image files (jpg, jpeg, png, gif, webp) up to 5MB. Requires authentication."
@@ -310,33 +345,25 @@ namespace LostAndFound.Api.Controllers
                     return Unauthorized(BaseResponse<object>.FailureResult("Invalid user token"));
                 }
 
-                if (file == null || file.Length == 0)
+                var (isValid, errorMessage) = _imageService.ValidateImage(file, 5 * 1024 * 1024);
+                if (!isValid)
                 {
-                    return BadRequest(BaseResponse<object>.FailureResult("No file uploaded"));
+                    return BadRequest(BaseResponse<object>.FailureResult(errorMessage!));
                 }
 
-                // Validate file type and size
-                var allowedExtensions = new[] { ".jpg", ".jpeg", ".png", ".gif", ".webp" };
-                var fileExtension = Path.GetExtension(file.FileName).ToLowerInvariant();
-                if (!allowedExtensions.Contains(fileExtension))
-                {
-                    return BadRequest(BaseResponse<object>.FailureResult("Invalid file type. Allowed: .jpg, .jpeg, .png, .gif, .webp"));
-                }
-
-                if (file.Length > 5 * 1024 * 1024) // 5MB
-                {
-                    return BadRequest(BaseResponse<object>.FailureResult("File size exceeds 5MB limit"));
-                }
-
-                // Get user
                 var user = await _unitOfWork.Users.GetByIdAsync(userId);
                 if (user == null)
                 {
                     return NotFound(BaseResponse<object>.FailureResult("User not found"));
                 }
 
-                var fileName = $"{Guid.NewGuid()}{fileExtension}";
-                var profilePictureUrl = $"/uploads/profiles/{userId}/{fileName}";
+                // Delete old profile picture from disk
+                if (!string.IsNullOrWhiteSpace(user.ProfilePictureUrl))
+                {
+                    await _imageService.DeleteImageAsync(user.ProfilePictureUrl);
+                }
+
+                var profilePictureUrl = await _imageService.SaveImageAsync(file, $"profiles/{userId}");
 
                 user.ProfilePictureUrl = profilePictureUrl;
                 user.UpdatedAt = DateTime.UtcNow;
@@ -345,21 +372,21 @@ namespace LostAndFound.Api.Controllers
 
                 return Ok(BaseResponse<object>.SuccessResult(new { ProfilePictureUrl = profilePictureUrl }, "Profile picture uploaded successfully"));
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                return StatusCode(500, BaseResponse<object>.FailureResult($"Error uploading profile picture: {ex.Message}"));
+                return StatusCode(500, BaseResponse<object>.FailureResult("An error occurred while uploading the profile picture"));
             }
         }
 
-        [HttpGet("{id}/posts")]
+        [HttpGet("{id}/reports")]
         [SwaggerOperation(
-            Summary = "Get user's posts",
-            Description = "Retrieves all posts created by a specific user with pagination support. Requires authentication."
+            Summary = "Get user's reports",
+            Description = "Retrieves all reports created by a specific user with pagination support. Requires authentication."
         )]
         [ProducesResponseType(typeof(BaseResponse<object>), 200)]
         [ProducesResponseType(401)]
         [ProducesResponseType(404)]
-        public async Task<IActionResult> GetUserPosts(int id, [FromQuery] int page = 1, [FromQuery] int pageSize = 20)
+        public async Task<IActionResult> GetUserReports(int id, [FromQuery] int page = 1, [FromQuery] int pageSize = 20)
         {
             try
             {
@@ -378,46 +405,46 @@ namespace LostAndFound.Api.Controllers
                     return NotFound(BaseResponse<object>.FailureResult("User not found"));
                 }
 
-                var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
-                var currentUserId = userIdClaim != null && int.TryParse(userIdClaim.Value, out int uid) ? uid : 0;
-
-                var allPosts = await _unitOfWork.Posts.GetAllWithIncludesAsync(
-                    "SubCategory", 
-                    "SubCategory.Category", 
-                    "Creator", 
-                    "Creator.UserRoles", 
-                    "Creator.UserRoles.Role",
-                    "Owner", 
-                    "Owner.UserRoles", 
-                    "Owner.UserRoles.Role",
-                    "PostImages", 
-                    "Photos",
-                    "Likes",
-                    "Comments",
-                    "Shares");
-                var posts = allPosts.Where(p => p.CreatorId == id).ToList();
-                var totalCount = posts.Count;
-
-                var pagedPosts = posts
-                    .OrderByDescending(p => p.CreatedAt)
-                    .Skip((page - 1) * pageSize)
-                    .Take(pageSize)
-                    .ToList();
-
-                var postDtos = _mapper.Map<List<PostDto>>(pagedPosts, opts => opts.Items["CurrentUserId"] = currentUserId);
+                var (reports, totalCount) = await _reportService.GetReportsByUserIdAsync(id, page, pageSize);
 
                 return Ok(BaseResponse<object>.SuccessResult(new
                 {
-                    Posts = postDtos,
+                    Reports = reports,
                     TotalCount = totalCount,
                     Page = page,
                     PageSize = pageSize,
                     TotalPages = (int)Math.Ceiling((double)totalCount / pageSize)
-                }, "User posts retrieved successfully"));
+                }, "User reports retrieved successfully"));
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                return StatusCode(500, BaseResponse<object>.FailureResult($"Error retrieving user posts: {ex.Message}"));
+                return StatusCode(500, BaseResponse<object>.FailureResult("An error occurred while retrieving user reports"));
+            }
+        }
+
+        [HttpGet("me/saved-reports")]
+        [SwaggerOperation(
+            Summary = "Get my saved reports",
+            Description = "Retrieves all reports the authenticated user has saved."
+        )]
+        [ProducesResponseType(typeof(BaseResponse<object>), 200)]
+        [ProducesResponseType(401)]
+        public async Task<IActionResult> GetMySavedReports()
+        {
+            try
+            {
+                var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
+                if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out int userId))
+                {
+                    return Unauthorized(BaseResponse<object>.FailureResult("Invalid user token"));
+                }
+
+                var reports = await _savedReportService.GetSavedReportsAsync(userId);
+                return Ok(BaseResponse<object>.SuccessResult(new { reports }, "Saved reports retrieved successfully"));
+            }
+            catch (Exception)
+            {
+                return StatusCode(500, BaseResponse<object>.FailureResult("An error occurred while retrieving saved reports"));
             }
         }
 

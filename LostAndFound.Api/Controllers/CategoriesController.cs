@@ -1,11 +1,12 @@
 using AutoMapper;
 using LostAndFound.Application.Common;
 using LostAndFound.Application.DTOs.Category;
-using LostAndFound.Application.DTOs.Post;
+using LostAndFound.Application.DTOs.Report;
 using LostAndFound.Application.Interfaces;
 using LostAndFound.Domain.Entities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Swashbuckle.AspNetCore.Annotations;
 namespace LostAndFound.Api.Controllers
@@ -13,6 +14,7 @@ namespace LostAndFound.Api.Controllers
     [ApiController]
     [Route("api/[controller]")]
     [Authorize]
+    [EnableRateLimiting("api")]
     public class CategoriesController : ControllerBase
     {
         private readonly IUnitOfWork _unitOfWork;
@@ -52,8 +54,8 @@ namespace LostAndFound.Api.Controllers
         {
             try
             {
-                var postCounts = await _unitOfWork.Posts.GetQueryable()
-                    .GroupBy(p => p.SubCategoryId)
+                var reportCounts = await _unitOfWork.Reports.GetQueryable()
+                    .GroupBy(r => r.SubCategoryId)
                     .Select(g => new { SubCategoryId = g.Key, Count = g.Count() })
                     .ToDictionaryAsync(x => x.SubCategoryId, x => x.Count);
 
@@ -65,7 +67,7 @@ namespace LostAndFound.Api.Controllers
                 {
                     foreach (var subCategory in category.SubCategories)
                     {
-                        subCategory.PostCount = postCounts.ContainsKey(subCategory.Id) ? postCounts[subCategory.Id] : 0;
+                        subCategory.ReportCount = reportCounts.ContainsKey(subCategory.Id) ? reportCounts[subCategory.Id] : 0;
                     }
                 }
                 
@@ -74,6 +76,37 @@ namespace LostAndFound.Api.Controllers
             catch (Exception ex)
             {
                 return StatusCode(500, BaseResponse<List<CategoryTreeDto>>.FailureResult($"Error retrieving category tree: {ex.Message}"));
+            }
+        }
+
+        [HttpGet("mapping")]
+        [AllowAnonymous]
+        [SwaggerOperation(
+            Summary = "Get category-subcategory mapping for mobile",
+            Description = "Returns a flat list of all category-subcategory-id mappings for mobile app dropdowns. Public endpoint - no authentication required."
+        )]
+        public async Task<IActionResult> GetCategoryMapping()
+        {
+            try
+            {
+                var categories = await _unitOfWork.Categories.GetAllWithIncludesAsync("SubCategories");
+                
+                var mappings = categories
+                    .SelectMany(c => c.SubCategories.Select(sc => new CategoryMappingDto
+                    {
+                        Category = c.Name,
+                        SubCategory = sc.Name,
+                        SubCategoryId = sc.Id
+                    }))
+                    .OrderBy(m => m.Category)
+                    .ThenBy(m => m.SubCategory)
+                    .ToList();
+                
+                return Ok(BaseResponse<List<CategoryMappingDto>>.SuccessResult(mappings, "Category mapping retrieved successfully"));
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, BaseResponse<List<CategoryMappingDto>>.FailureResult($"Error retrieving category mapping: {ex.Message}"));
             }
         }
 
@@ -103,12 +136,12 @@ namespace LostAndFound.Api.Controllers
             }
         }
 
-        [HttpGet("{id}/posts")]
+        [HttpGet("{id}/reports")]
         [SwaggerOperation(
-            Summary = "Get posts by category",
-            Description = "Retrieves all posts that belong to subcategories under the specified category. Requires authentication."
+            Summary = "Get reports by category",
+            Description = "Retrieves all reports that belong to subcategories under the specified category. Requires authentication."
         )]
-        public async Task<IActionResult> GetCategoryPosts(int id)
+        public async Task<IActionResult> GetCategoryReports(int id)
         {
             try
             {
@@ -121,15 +154,15 @@ namespace LostAndFound.Api.Controllers
                 }
                 var subCategoryIds = foundCategory.SubCategories.Select(sc => sc.Id).ToList();
                
-                var allPosts = await _unitOfWork.Posts.GetAllWithIncludesAsync("SubCategory", "SubCategory.Category", "Creator", "PostImages", "Owner");
-                var posts = allPosts.Where(p => subCategoryIds.Contains(p.SubCategoryId)).ToList();
+                var allReports = await _unitOfWork.Reports.GetAllWithIncludesAsync("SubCategory", "SubCategory.Category", "CreatedBy", "Images");
+                var reports = allReports.Where(r => subCategoryIds.Contains(r.SubCategoryId)).ToList();
                 
-                var postDtos = _mapper.Map<IEnumerable<PostDto>>(posts);
-                return Ok(BaseResponse<IEnumerable<PostDto>>.SuccessResult(postDtos, $"Posts for category '{foundCategory.Name}' retrieved successfully"));
+                var reportDtos = _mapper.Map<IEnumerable<ReportDto>>(reports);
+                return Ok(BaseResponse<IEnumerable<ReportDto>>.SuccessResult(reportDtos, $"Reports for category '{foundCategory.Name}' retrieved successfully"));
             }
             catch (Exception ex)
             {
-                return StatusCode(500, BaseResponse<object>.FailureResult($"Error retrieving category posts: {ex.Message}"));
+                return StatusCode(500, BaseResponse<object>.FailureResult($"Error retrieving category reports: {ex.Message}"));
             }
         }
 

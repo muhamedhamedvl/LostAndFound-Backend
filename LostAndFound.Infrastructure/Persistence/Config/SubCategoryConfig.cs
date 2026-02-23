@@ -34,9 +34,9 @@ namespace LostAndFound.Infrastructure.Persistence.Config
             builder.Property(sc => sc.UpdatedAt)
                 .IsRequired(false);
 
-            builder.HasMany(sc => sc.Posts)
-                .WithOne(p => p.SubCategory)
-                .HasForeignKey(p => p.SubCategoryId)
+            builder.HasMany(sc => sc.Reports)
+                .WithOne(r => r.SubCategory)
+                .HasForeignKey(r => r.SubCategoryId)
                 .OnDelete(DeleteBehavior.Restrict);
         }
     }

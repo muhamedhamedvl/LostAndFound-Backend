@@ -1,17 +1,23 @@
-﻿using LostAndFound.Infrastructure;
+using LostAndFound.Infrastructure;
+using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.RateLimiting;
 using LostAndFound.Application.Interfaces;
 using LostAndFound.Application.Services;
 using LostAndFound.Application.Validators;
 using LostAndFound.Api.Filters;
 using LostAndFound.Api.Hubs;
+using LostAndFound.Api.Options;
 using LostAndFound.Api.Services;
 using FluentValidation;
+using FirebaseAdmin;
+using Google.Apis.Auth.OAuth2;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using Serilog;
 using System.Text;
 using LostAndFound.Api.Services.Interfaces;
+using System.Net;
 
 namespace LostAndFound.Api
 {
@@ -77,12 +83,60 @@ namespace LostAndFound.Api
                 // Infrastructure
                 builder.Services.AddInfrastructureServices(builder.Configuration);
 
+                // Firebase options (bind from config / User Secrets)
+                builder.Services.Configure<FirebaseOptions>(builder.Configuration.GetSection(FirebaseOptions.SectionName));
+
+                // Push notifications: Firebase if configured, else stub
+                var firebaseOptions = builder.Configuration.GetSection(FirebaseOptions.SectionName).Get<FirebaseOptions>();
+                if (firebaseOptions?.IsValid == true)
+                {
+                    try
+                    {
+                        var json = FirebaseCredentialHelper.BuildServiceAccountJson(
+                            firebaseOptions.ProjectId,
+                            firebaseOptions.ClientEmail,
+                            firebaseOptions.PrivateKey);
+                        var credential = GoogleCredential.FromStream(new MemoryStream(Encoding.UTF8.GetBytes(json)));
+                        if (FirebaseApp.DefaultInstance == null)
+                            FirebaseApp.Create(new AppOptions { Credential = credential });
+                        builder.Services.AddScoped<IPushNotificationService, FirebasePushNotificationService>();
+                        Log.Information("Firebase push notifications enabled.");
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Warning(ex, "Firebase init failed; using stub push service.");
+                        builder.Services.AddScoped<IPushNotificationService, PushNotificationServiceStub>();
+                    }
+                }
+                else
+                {
+                    builder.Services.AddScoped<IPushNotificationService, PushNotificationServiceStub>();
+                }
+
+                // Image Service
+                builder.Services.AddScoped<IImageService>(sp =>
+                    new ImageService(Path.Combine(Directory.GetCurrentDirectory(), "wwwroot")));
+
                 // Validators
                 builder.Services.AddValidatorsFromAssemblyContaining<LoginDtoValidator>();
 
-                // JWT Authentication
+                // JWT Authentication - validate required config
                 var jwtSettings = builder.Configuration.GetSection("JwtSettings");
                 var secretKey = jwtSettings["SecretKey"];
+                if (string.IsNullOrWhiteSpace(secretKey) || secretKey.Length < 32)
+                {
+                    if (builder.Environment.IsDevelopment())
+                    {
+                        secretKey = "DevOnly-32CharsMin-LostAndFound-Local-Key";
+                        Log.Warning("Using default dev JWT secret. Set JwtSettings:SecretKey in User Secrets for production-like setup.");
+                    }
+                    else
+                    {
+                        throw new InvalidOperationException(
+                            "JwtSettings:SecretKey is required and must be at least 32 characters in Production. " +
+                            "Set JwtSettings__SecretKey environment variable.");
+                    }
+                }
 
                 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                     .AddJwtBearer(options =>
@@ -95,7 +149,8 @@ namespace LostAndFound.Api
                             ValidateIssuerSigningKey = true,
                             ValidIssuer = jwtSettings["Issuer"],
                             ValidAudience = jwtSettings["Audience"],
-                            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey!))
+                            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey!)),
+                            ClockSkew = TimeSpan.Zero
                         };
 
                         // SignalR JWT support
@@ -129,15 +184,62 @@ namespace LostAndFound.Api
                 builder.Services.AddSingleton<IUserConnectionManager, UserConnectionManager>();
                 builder.Services.AddScoped<IChatHubService, ChatHubService>();
                 builder.Services.AddScoped<INotificationHubService, NotificationHubService>();
+                builder.Services.AddScoped<IRealtimeNotificationSender, SignalRNotificationSender>();
 
-                // CORS (Production safe)
+                // CORS - production: set Cors:AllowedOrigins (JSON array) or Cors__AllowedOrigins (comma-separated); dev: AllowAll if empty
+                var originsFromArray = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>();
+                var originsFromEnv = builder.Configuration["Cors__AllowedOrigins"];
+                var allowedOrigins = (originsFromArray?.Length > 0 ? originsFromArray : null)
+                    ?? (string.IsNullOrEmpty(originsFromEnv) ? Array.Empty<string>() : originsFromEnv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
                 builder.Services.AddCors(options =>
                 {
-                    options.AddPolicy("AllowAll", policy =>
+                    if (allowedOrigins.Length > 0)
                     {
-                        policy.AllowAnyOrigin()
-                              .AllowAnyHeader()
-                              .AllowAnyMethod();
+                        options.AddPolicy("Configured", policy =>
+                        {
+                            policy.WithOrigins(allowedOrigins)
+                                  .AllowAnyHeader()
+                                  .AllowAnyMethod();
+                        });
+                    }
+                    else
+                    {
+                        options.AddPolicy("Configured", policy =>
+                        {
+                            policy.AllowAnyOrigin()
+                                  .AllowAnyHeader()
+                                  .AllowAnyMethod();
+                        });
+                    }
+                });
+
+                // Rate Limiting
+                builder.Services.AddRateLimiter(options =>
+                {
+                    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
+                    // Auth endpoints: 5 requests per minute per IP
+                    options.AddFixedWindowLimiter("auth", opt =>
+                    {
+                        opt.PermitLimit = 5;
+                        opt.Window = TimeSpan.FromMinutes(1);
+                        opt.QueueLimit = 0;
+                    });
+
+                    // Upload endpoints: 10 requests per minute per IP
+                    options.AddFixedWindowLimiter("upload", opt =>
+                    {
+                        opt.PermitLimit = 10;
+                        opt.Window = TimeSpan.FromMinutes(1);
+                        opt.QueueLimit = 0;
+                    });
+
+                    // General API: 100 requests per minute per IP
+                    options.AddFixedWindowLimiter("api", opt =>
+                    {
+                        opt.PermitLimit = 100;
+                        opt.Window = TimeSpan.FromMinutes(1);
+                        opt.QueueLimit = 2;
                     });
                 });
 
@@ -149,16 +251,110 @@ namespace LostAndFound.Api
                     await LostAndFound.Infrastructure.Persistence.DbSeeder.SeedAsync(scope.ServiceProvider);
                 }
 
-                // Swagger ALWAYS enabled (Fix MonsterASP 404)
+                // Swagger security in Production (IP whitelist + Basic Auth)
+                if (app.Environment.IsProduction())
+                {
+                    var swaggerUser = Environment.GetEnvironmentVariable("SWAGGER_USER");
+                    var swaggerPass = Environment.GetEnvironmentVariable("SWAGGER_PASS");
+                    var swaggerIps = Environment.GetEnvironmentVariable("SWAGGER_ALLOWED_IPS");
+
+                    var allowedIpSet = new HashSet<IPAddress>();
+                    if (!string.IsNullOrWhiteSpace(swaggerIps))
+                    {
+                        foreach (var ipStr in swaggerIps.Split(',', ';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                        {
+                            if (IPAddress.TryParse(ipStr, out var ip))
+                            {
+                                allowedIpSet.Add(ip);
+                            }
+                        }
+                    }
+
+                    app.Use(async (context, next) =>
+                    {
+                        if (context.Request.Path.StartsWithSegments("/swagger", StringComparison.OrdinalIgnoreCase))
+                        {
+                            // IP whitelist (if configured)
+                            if (allowedIpSet.Count > 0)
+                            {
+                                var remoteIp = context.Connection.RemoteIpAddress;
+                                var ipToCheck = remoteIp?.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6
+                                    ? remoteIp.MapToIPv4()
+                                    : remoteIp;
+
+                                if (ipToCheck == null || !allowedIpSet.Contains(ipToCheck))
+                                {
+                                    context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                                    await context.Response.WriteAsync("Forbidden");
+                                    return;
+                                }
+                            }
+
+                            // Basic Auth (if credentials are configured)
+                            if (!string.IsNullOrEmpty(swaggerUser) && !string.IsNullOrEmpty(swaggerPass))
+                            {
+                                if (!context.Request.Headers.TryGetValue("Authorization", out var authHeaderValues))
+                                {
+                                    context.Response.Headers["WWW-Authenticate"] = "Basic realm=\"Swagger\"";
+                                    context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                                    await context.Response.WriteAsync("Unauthorized");
+                                    return;
+                                }
+
+                                var authHeader = authHeaderValues.ToString();
+                                if (!authHeader.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    context.Response.Headers["WWW-Authenticate"] = "Basic realm=\"Swagger\"";
+                                    context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                                    await context.Response.WriteAsync("Unauthorized");
+                                    return;
+                                }
+
+                                string decoded;
+                                try
+                                {
+                                    var encoded = authHeader.Substring("Basic ".Length).Trim();
+                                    decoded = Encoding.UTF8.GetString(Convert.FromBase64String(encoded));
+                                }
+                                catch
+                                {
+                                    context.Response.Headers["WWW-Authenticate"] = "Basic realm=\"Swagger\"";
+                                    context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                                    await context.Response.WriteAsync("Unauthorized");
+                                    return;
+                                }
+
+                                var parts = decoded.Split(':', 2);
+                                if (parts.Length != 2 ||
+                                    !string.Equals(parts[0], swaggerUser, StringComparison.Ordinal) ||
+                                    !string.Equals(parts[1], swaggerPass, StringComparison.Ordinal))
+                                {
+                                    context.Response.Headers["WWW-Authenticate"] = "Basic realm=\"Swagger\"";
+                                    context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                                    await context.Response.WriteAsync("Unauthorized");
+                                    return;
+                                }
+                            }
+                        }
+
+                        await next();
+                    });
+                }
+
+                // Swagger: enabled in all environments now
                 app.UseSwagger();
                 app.UseSwaggerUI(c =>
                 {
                     c.SwaggerEndpoint("/swagger/v1/swagger.json", "LostAndFound API v1");
-                    c.RoutePrefix = string.Empty;   // Homepage = Swagger
+                    c.RoutePrefix = "swagger";
                 });
 
                 app.UseHttpsRedirection();
-                app.UseCors("AllowAll");
+                app.UseStaticFiles();
+                app.UseCors("Configured");
+
+                // Rate Limiting
+                app.UseRateLimiter();
 
                 // Middlewares
                 app.UseMiddleware<LostAndFound.Api.Middleware.RequestLoggingMiddleware>();

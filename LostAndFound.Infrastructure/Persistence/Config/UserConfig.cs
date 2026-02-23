@@ -4,9 +4,9 @@ using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace LostAndFound.Infrastructure.Persistence.Config
 {
-    public class UserConfig : IEntityTypeConfiguration<User>
+    public class UserConfig : IEntityTypeConfiguration<AppUser>
     {
-        public void Configure(EntityTypeBuilder<User> builder)
+        public void Configure(EntityTypeBuilder<AppUser> builder)
         {
             builder.ToTable("Users", t => t.HasCheckConstraint("CHK_Users_Gender", "[Gender] IN ('Male', 'Female', 'Anonymous') OR [Gender] IS NULL"));
 
@@ -48,15 +48,23 @@ namespace LostAndFound.Infrastructure.Persistence.Config
                 .HasMaxLength(500)
                 .IsRequired(false);
 
+            builder.Property(u => u.GoogleId)
+                .HasMaxLength(100)
+                .IsRequired(false);
+
+            builder.HasIndex(u => u.GoogleId)
+                .IsUnique()
+                .HasFilter("[GoogleId] IS NOT NULL");
+
             builder.Property(u => u.CreatedAt)
                 .HasDefaultValueSql("GETUTCDATE()");
 
             builder.Property(u => u.UpdatedAt)
                 .IsRequired(false);
 
-            builder.HasMany(u => u.Posts)
-                .WithOne(p => p.Creator)
-                .HasForeignKey(p => p.CreatorId)
+            builder.HasMany(u => u.Reports)
+                .WithOne(r => r.CreatedBy)
+                .HasForeignKey(r => r.CreatedById)
                 .OnDelete(DeleteBehavior.Restrict);
         }
     }

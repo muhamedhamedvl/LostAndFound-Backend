@@ -13,42 +13,36 @@ namespace LostAndFound.Infrastructure.Persistence.Repositories
         public UnitOfWork(AppDbContext context)
         {
             _context = context;
-            Users = new Repository<User>(_context);
+            Users = new Repository<AppUser>(_context);
             Roles = new Repository<Role>(_context);
             UserRoles = new Repository<UserRole>(_context);
-            Posts = new Repository<Post>(_context);
+            Reports = new Repository<Report>(_context);
+            ReportImages = new Repository<ReportImage>(_context);
+            ReportMatches = new Repository<ReportMatch>(_context);
+            ReportAbuses = new Repository<ReportAbuse>(_context);
+            SavedReports = new Repository<SavedReport>(_context);
             Categories = new Repository<Category>(_context);
             SubCategories = new Repository<SubCategory>(_context);
             ChatSessions = new Repository<ChatSession>(_context);
             ChatMessages = new Repository<ChatMessage>(_context);
-            ChatParticipants = new Repository<ChatParticipant>(_context);
-            Photos = new Repository<Photo>(_context);
-            PostImages = new Repository<PostImage>(_context);
-            
-            // Social features
-            Likes = new Repository<Like>(_context);
-            Comments = new Repository<Comment>(_context);
-            Shares = new Repository<Share>(_context);
             Notifications = new Repository<Notification>(_context);
+            DeviceTokens = new Repository<DeviceToken>(_context);
         }
 
-        public IRepository<User> Users { get; }
+        public IRepository<AppUser> Users { get; }
         public IRepository<Role> Roles { get; }
         public IRepository<UserRole> UserRoles { get; }
-        public IRepository<Post> Posts { get; }
+        public IRepository<Report> Reports { get; }
+        public IRepository<ReportImage> ReportImages { get; }
+        public IRepository<ReportMatch> ReportMatches { get; }
+        public IRepository<ReportAbuse> ReportAbuses { get; }
+        public IRepository<SavedReport> SavedReports { get; }
         public IRepository<Category> Categories { get; }
         public IRepository<SubCategory> SubCategories { get; }
         public IRepository<ChatSession> ChatSessions { get; }
         public IRepository<ChatMessage> ChatMessages { get; }
-        public IRepository<ChatParticipant> ChatParticipants { get; }
-        public IRepository<Photo> Photos { get; }
-        public IRepository<PostImage> PostImages { get; }
-        
-        // Social features
-        public IRepository<Like> Likes { get; }
-        public IRepository<Comment> Comments { get; }
-        public IRepository<Share> Shares { get; }
         public IRepository<Notification> Notifications { get; }
+        public IRepository<DeviceToken> DeviceTokens { get; }
 
         public async Task<int> SaveChangesAsync()
         {

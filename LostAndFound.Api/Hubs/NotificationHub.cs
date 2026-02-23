@@ -25,14 +25,14 @@ namespace LostAndFound.Api.Hubs
             }
         }
 
-        public async Task JoinItemGroup(int itemId)
+        public async Task JoinReportGroup(int reportId)
         {
-            await Groups.AddToGroupAsync(Context.ConnectionId, $"Item_{itemId}");
+            await Groups.AddToGroupAsync(Context.ConnectionId, $"Report_{reportId}");
         }
 
-        public async Task LeaveItemGroup(int itemId)
+        public async Task LeaveReportGroup(int reportId)
         {
-            await Groups.RemoveFromGroupAsync(Context.ConnectionId, $"Item_{itemId}");
+            await Groups.RemoveFromGroupAsync(Context.ConnectionId, $"Report_{reportId}");
         }
 
         public override async Task OnConnectedAsync()

@@ -1,10 +1,12 @@
-using AutoMapper;
+using System.Linq;
 using LostAndFound.Application.Common;
-using LostAndFound.Application.DTOs.Social;
+using LostAndFound.Application.DTOs.Notification;
 using LostAndFound.Application.Interfaces;
+using LostAndFound.Api.Options;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.Options;
 using Swashbuckle.AspNetCore.Annotations;
 using System.Security.Claims;
 
@@ -13,21 +15,47 @@ namespace LostAndFound.Api.Controllers
     [Route("api/[controller]")]
     [ApiController]
     [Authorize]
+    [EnableRateLimiting("api")]
     public class NotificationsController : ControllerBase
     {
-        private readonly IUnitOfWork _unitOfWork;
+        private readonly INotificationService _notificationService;
+        private readonly IDeviceTokenService _deviceTokenService;
+        private readonly FirebaseOptions? _firebaseOptions;
 
-        public NotificationsController(IUnitOfWork unitOfWork)
+        public NotificationsController(
+            INotificationService notificationService,
+            IDeviceTokenService deviceTokenService,
+            IOptions<FirebaseOptions>? firebaseOptions = null)
         {
-            _unitOfWork = unitOfWork;
+            _notificationService = notificationService;
+            _deviceTokenService = deviceTokenService;
+            _firebaseOptions = firebaseOptions?.Value;
         }
 
         /// <summary>
-        /// Get user's notifications
+        /// Get VAPID public key for web push (frontend device registration).
+        /// Safe to expose; do not expose the private key.
         /// </summary>
+        [HttpGet("vapid-public-key")]
+        [AllowAnonymous]
+        [SwaggerOperation(Summary = "Get VAPID public key", Description = "Returns the VAPID public key for web push subscription. Use this in the frontend when registering for push. No auth required.")]
+        public IActionResult GetVapidPublicKey()
+        {
+            if (string.IsNullOrWhiteSpace(_firebaseOptions?.VapidKey))
+                return NotFound(BaseResponse<object>.FailureResult("VAPID key not configured"));
+            return Ok(BaseResponse<object>.SuccessResult(new { vapidPublicKey = _firebaseOptions.VapidKey }, "VAPID public key"));
+        }
+
+        /// <summary>
+        /// Get user's notifications.
+        /// </summary>
+        /// <param name="page">Page number (default: 1)</param>
+        /// <param name="pageSize">Page size (default: 20)</param>
+        /// <param name="type">Filter by read status: all (default), unread, read</param>
+        /// <param name="category">Filter by notification category: all (default), general, matches</param>
         [HttpGet]
-        [SwaggerOperation(Summary = "Get notifications", Description = "Retrieves all notifications for the authenticated user. Requires authentication.")]
-        public async Task<IActionResult> GetNotifications([FromQuery] int page = 1, [FromQuery] int pageSize = 20)
+        [SwaggerOperation(Summary = "Get notifications", Description = "Retrieves notifications for the authenticated user with optional filters. Type filter: all/unread/read. Category filter: all/general/matches. Requires authentication.")]
+        public async Task<IActionResult> GetNotifications([FromQuery] int page = 1, [FromQuery] int pageSize = 20, [FromQuery] string? type = null, [FromQuery] string? category = null)
         {
             try
             {
@@ -35,40 +63,20 @@ namespace LostAndFound.Api.Controllers
                 if (userId == 0)
                     return Unauthorized(BaseResponse<object>.FailureResult("Invalid user token"));
 
-                var notifications = await _unitOfWork.Notifications.GetQueryable()
-                    .Include(n => n.Actor)
-                    .Where(n => n.UserId == userId)
-                    .OrderByDescending(n => n.CreatedAt)
-                    .Skip((page - 1) * pageSize)
-                    .Take(pageSize)
-                    .Select(n => new NotificationDto
-                    {
-                        Id = n.Id,
-                        Type = n.Type,
-                        Content = n.Content,
-                        PostId = n.PostId,
-                        ActorId = n.ActorId,
-                        ActorName = n.Actor != null ? n.Actor.FullName : "",
-                        IsRead = n.IsRead,
-                        CreatedAt = n.CreatedAt
-                    })
-                    .ToListAsync();
-
-                var totalCount = await _unitOfWork.Notifications.GetQueryable()
-                    .Where(n => n.UserId == userId)
-                    .CountAsync();
+                var (notifications, totalCount) = await _notificationService.GetUserNotificationsAsync(userId, type, category, page, pageSize);
 
                 return Ok(BaseResponse<object>.SuccessResult(new
                 {
                     notifications,
                     totalCount,
                     page,
-                    pageSize
+                    pageSize,
+                    totalPages = (int)Math.Ceiling(totalCount / (double)pageSize)
                 }, "Notifications retrieved successfully"));
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                return StatusCode(500, BaseResponse<List<NotificationDto>>.FailureResult($"Error retrieving notifications: {ex.Message}"));
+                return StatusCode(500, BaseResponse<object>.FailureResult("An error occurred while retrieving notifications"));
             }
         }
 
@@ -85,15 +93,13 @@ namespace LostAndFound.Api.Controllers
                 if (userId == 0)
                     return Unauthorized(BaseResponse<object>.FailureResult("Invalid user token"));
 
-                var count = await _unitOfWork.Notifications.GetQueryable()
-                    .Where(n => n.UserId == userId && !n.IsRead)
-                    .CountAsync();
+                var count = await _notificationService.GetUnreadCountAsync(userId);
 
                 return Ok(BaseResponse<object>.SuccessResult(new { unreadCount = count }, "Unread count retrieved successfully"));
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                return StatusCode(500, BaseResponse<object>.FailureResult($"Error retrieving unread count: {ex.Message}"));
+                return StatusCode(500, BaseResponse<object>.FailureResult("An error occurred while retrieving unread count"));
             }
         }
 
@@ -110,24 +116,17 @@ namespace LostAndFound.Api.Controllers
                 if (userId == 0)
                     return Unauthorized(BaseResponse<object>.FailureResult("Invalid user token"));
 
-                var notification = await _unitOfWork.Notifications.GetByIdAsync(id);
-                if (notification == null)
-                    return NotFound(BaseResponse<object>.FailureResult("Notification not found"));
+                await _notificationService.MarkAsReadAsync(id, userId);
 
-                if (notification.UserId != userId)
-                    return Forbid();
-
-                notification.IsRead = true;
-                notification.UpdatedAt = DateTime.UtcNow;
-                
-                await _unitOfWork.Notifications.UpdateAsync(notification);
-                await _unitOfWork.SaveChangesAsync();
-
-                return Ok(BaseResponse<object>.SuccessResult(null, "Notification marked as read"));
+                return Ok(BaseResponse<object>.SuccessResult(null!, "Notification marked as read"));
             }
-            catch (Exception ex)
+            catch (KeyNotFoundException)
             {
-                return StatusCode(500, BaseResponse<object>.FailureResult($"Error marking notification as read: {ex.Message}"));
+                return NotFound(BaseResponse<object>.FailureResult("Notification not found"));
+            }
+            catch (Exception)
+            {
+                return StatusCode(500, BaseResponse<object>.FailureResult("An error occurred while marking notification as read"));
             }
         }
 
@@ -144,23 +143,13 @@ namespace LostAndFound.Api.Controllers
                 if (userId == 0)
                     return Unauthorized(BaseResponse<object>.FailureResult("Invalid user token"));
 
-                var notifications = await _unitOfWork.Notifications.GetQueryable()
-                    .Where(n => n.UserId == userId && !n.IsRead)
-                    .ToListAsync();
+                var updatedCount = await _notificationService.MarkAllAsReadAsync(userId);
 
-                foreach (var notification in notifications)
-                {
-                    notification.IsRead = true;
-                    notification.UpdatedAt = DateTime.UtcNow;
-                }
-
-                await _unitOfWork.SaveChangesAsync();
-
-                return Ok(BaseResponse<object>.SuccessResult(new { updatedCount = notifications.Count }, "All notifications marked as read"));
+                return Ok(BaseResponse<object>.SuccessResult(new { updatedCount }, "All notifications marked as read"));
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                return StatusCode(500, BaseResponse<object>.FailureResult($"Error marking all notifications as read: {ex.Message}"));
+                return StatusCode(500, BaseResponse<object>.FailureResult("An error occurred while marking all notifications as read"));
             }
         }
 
@@ -177,21 +166,43 @@ namespace LostAndFound.Api.Controllers
                 if (userId == 0)
                     return Unauthorized(BaseResponse<object>.FailureResult("Invalid user token"));
 
-                var notification = await _unitOfWork.Notifications.GetByIdAsync(id);
-                if (notification == null)
-                    return NotFound(BaseResponse<object>.FailureResult("Notification not found"));
+                await _notificationService.DeleteNotificationAsync(id, userId);
 
-                if (notification.UserId != userId)
-                    return Forbid();
-
-                await _unitOfWork.Notifications.DeleteAsync(notification);
-                await _unitOfWork.SaveChangesAsync();
-
-                return Ok(BaseResponse<object>.SuccessResult(null, "Notification deleted successfully"));
+                return Ok(BaseResponse<object>.SuccessResult(null!, "Notification deleted successfully"));
             }
-            catch (Exception ex)
+            catch (KeyNotFoundException)
             {
-                return StatusCode(500, BaseResponse<object>.FailureResult($"Error deleting notification: {ex.Message}"));
+                return NotFound(BaseResponse<object>.FailureResult("Notification not found"));
+            }
+            catch (Exception)
+            {
+                return StatusCode(500, BaseResponse<object>.FailureResult("An error occurred while deleting the notification"));
+            }
+        }
+
+        /// <summary>
+        /// Register device token for push notifications (FCM/APNs).
+        /// </summary>
+        [HttpPost("register-device")]
+        [SwaggerOperation(Summary = "Register device token", Description = "Registers or updates the device token for push notifications. Requires authentication.")]
+        public async Task<IActionResult> RegisterDeviceToken([FromBody] RegisterDeviceTokenDto dto)
+        {
+            try
+            {
+                var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "0");
+                if (userId == 0)
+                    return Unauthorized(BaseResponse<object>.FailureResult("Invalid user token"));
+
+                if (!ModelState.IsValid)
+                    return BadRequest(BaseResponse<object>.FailureResult("Validation failed", ModelState.Values.SelectMany(v => v.Errors).Select(e => e.ErrorMessage).ToList()));
+
+                await _deviceTokenService.RegisterTokenAsync(userId, dto.Token, dto.Platform);
+
+                return Ok(BaseResponse<object>.SuccessResult(null!, "Device token registered successfully"));
+            }
+            catch (Exception)
+            {
+                return StatusCode(500, BaseResponse<object>.FailureResult("An error occurred while registering device token"));
             }
         }
     }

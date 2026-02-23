@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
@@ -9,9 +9,16 @@ namespace LostAndFound.Application.DTOs.Auth
 {
     public class SignupDto
     {
-        [Required(ErrorMessage = "Full name is required")]
-        [StringLength(100, ErrorMessage = "Full name cannot exceed 100 characters")]
-        public string FullName { get; set; } = string.Empty;
+        [Required(ErrorMessage = "First name is required")]
+        [StringLength(50, ErrorMessage = "First name cannot exceed 50 characters")]
+        public string FirstName { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Last name is required")]
+        [StringLength(50, ErrorMessage = "Last name cannot exceed 50 characters")]
+        public string LastName { get; set; } = string.Empty;
+
+        public DateTime? DateOfBirth { get; set; }
+        public string? Gender { get; set; }
 
         [Required(ErrorMessage = "Email is required")]
         [EmailAddress(ErrorMessage = "Invalid email format")]
