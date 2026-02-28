@@ -10,6 +10,10 @@ namespace LostAndFound.Infrastructure.Persistence.Config
         {
             builder.ToTable("Users", t => t.HasCheckConstraint("CHK_Users_Gender", "[Gender] IN ('Male', 'Female', 'Anonymous') OR [Gender] IS NULL"));
 
+            // Global query filter: soft-deleted AND blocked users are excluded from all queries by default.
+            // Use .IgnoreQueryFilters() in queries that explicitly need deleted/blocked users (e.g. Admin panels).
+            builder.HasQueryFilter(u => !u.IsDeleted && !u.IsBlocked);
+
             builder.HasKey(u => u.Id);
 
             builder.Property(u => u.FullName)

@@ -27,6 +27,7 @@ namespace LostAndFound.Infrastructure.Persistence.Repositories
             ChatMessages = new Repository<ChatMessage>(_context);
             Notifications = new Repository<Notification>(_context);
             DeviceTokens = new Repository<DeviceToken>(_context);
+            RefreshTokens = new Repository<RefreshToken>(_context);
         }
 
         public IRepository<AppUser> Users { get; }
@@ -43,6 +44,7 @@ namespace LostAndFound.Infrastructure.Persistence.Repositories
         public IRepository<ChatMessage> ChatMessages { get; }
         public IRepository<Notification> Notifications { get; }
         public IRepository<DeviceToken> DeviceTokens { get; }
+        public IRepository<RefreshToken> RefreshTokens { get; }
 
         public async Task<int> SaveChangesAsync()
         {
