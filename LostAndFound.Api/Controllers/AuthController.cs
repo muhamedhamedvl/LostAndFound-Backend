@@ -1,3 +1,4 @@
+using LostAndFound.Application.Common;
 using LostAndFound.Application.DTOs.Auth;
 using LostAndFound.Application.Interfaces;
 using Microsoft.AspNetCore.Authorization;
@@ -12,27 +13,31 @@ namespace LostAndFound.Api.Controllers
     public class AuthController : ControllerBase
     {
         private readonly IAuthService _authService;
+        private readonly ILogger<AuthController> _logger;
 
-        public AuthController(IAuthService authService)
+        public AuthController(IAuthService authService, ILogger<AuthController> logger)
         {
             _authService = authService;
+            _logger = logger;
         }
 
         [HttpPost("signup")]
         [SwaggerOperation(
             Summary = "Create a new user account",
-            Description = "Registers a new user with email, password, and personal information. A verification code will be sent to the provided email address."
+            Description = "Registers a new user with email, password, and personal information. A verification code will be sent to the provided email address. No JWT is issued until the account is verified."
         )]
         public async Task<IActionResult> Signup([FromBody] SignupDto signupDto)
         {
-            var result = await _authService.SignupAsync(signupDto);
-            
-            if (result.Success)
+            try
             {
-                return Ok(result);
+                var result = await _authService.SignupAsync(signupDto);
+                return result.Success ? Ok(result) : BadRequest(result);
             }
-            
-            return BadRequest(result);
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during signup");
+                return StatusCode(500, BaseResponse.FailureResult("An unexpected error occurred."));
+            }
         }
 
         [HttpPost("login")]
@@ -42,14 +47,16 @@ namespace LostAndFound.Api.Controllers
         )]
         public async Task<IActionResult> Login([FromBody] LoginDto loginDto)
         {
-            var result = await _authService.LoginAsync(loginDto);
-            
-            if (result.Success)
+            try
             {
-                return Ok(result);
+                var result = await _authService.LoginAsync(loginDto);
+                return result.Success ? Ok(result) : Unauthorized(result);
             }
-            
-            return Unauthorized(result);
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during login");
+                return StatusCode(500, BaseResponse.FailureResult("An unexpected error occurred."));
+            }
         }
 
         [HttpPost("google")]
@@ -59,14 +66,16 @@ namespace LostAndFound.Api.Controllers
         )]
         public async Task<IActionResult> GoogleSignIn([FromBody] GoogleSignInDto dto)
         {
-            var result = await _authService.GoogleSignInAsync(dto);
-            
-            if (result.Success)
+            try
             {
-                return Ok(result);
+                var result = await _authService.GoogleSignInAsync(dto);
+                return result.Success ? Ok(result) : Unauthorized(result);
             }
-            
-            return Unauthorized(result);
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during Google sign-in");
+                return StatusCode(500, BaseResponse.FailureResult("An unexpected error occurred."));
+            }
         }
 
         [HttpGet("verify-account")]
@@ -76,37 +85,42 @@ namespace LostAndFound.Api.Controllers
         )]
         public async Task<IActionResult> VerifyAccount([FromQuery] string code, [FromQuery] string email)
         {
-            var verifyAccountDto = new VerifyAccountDto
+            try
             {
-                Code = code,
-                Email = email
-            };
+                var verifyAccountDto = new VerifyAccountDto
+                {
+                    Code = code,
+                    Email = email
+                };
 
-            var result = await _authService.VerifyAccountAsync(verifyAccountDto);
-            
-            if (result.Success)
-            {
-                return Ok(result);
+                var result = await _authService.VerifyAccountAsync(verifyAccountDto);
+                return result.Success ? Ok(result) : BadRequest(result);
             }
-            
-            return BadRequest(result);
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during account verification");
+                return StatusCode(500, BaseResponse.FailureResult("An unexpected error occurred."));
+            }
         }
 
         [HttpPost("refresh-token")]
+        [EnableRateLimiting("refresh")]
         [SwaggerOperation(
             Summary = "Refresh access token using a valid refresh token",
             Description = "Validates the provided refresh token and issues a new access token and refresh token pair. This allows users to maintain their session without re-authenticating."
         )]
         public async Task<IActionResult> RefreshToken([FromBody] RefreshTokenDto refreshTokenDto)
         {
-            var result = await _authService.RefreshTokenAsync(refreshTokenDto);
-            
-            if (result.Success)
+            try
             {
-                return Ok(result);
+                var result = await _authService.RefreshTokenAsync(refreshTokenDto);
+                return result.Success ? Ok(result) : Unauthorized(result);
             }
-            
-            return Unauthorized(result);
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during token refresh");
+                return StatusCode(500, BaseResponse.FailureResult("An unexpected error occurred."));
+            }
         }
 
         [HttpPost("forgot-password")]
@@ -116,14 +130,16 @@ namespace LostAndFound.Api.Controllers
         )]
         public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordDto forgotPasswordDto)
         {
-            var result = await _authService.ForgotPasswordAsync(forgotPasswordDto);
-            
-            if (result.Success)
+            try
             {
-                return Ok(result);
+                var result = await _authService.ForgotPasswordAsync(forgotPasswordDto);
+                return result.Success ? Ok(result) : BadRequest(result);
             }
-            
-            return BadRequest(result);
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during forgot password");
+                return StatusCode(500, BaseResponse.FailureResult("An unexpected error occurred."));
+            }
         }
 
         [HttpPost("reset-password")]
@@ -133,14 +149,16 @@ namespace LostAndFound.Api.Controllers
         )]
         public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordDto resetPasswordDto)
         {
-            var result = await _authService.ResetPasswordAsync(resetPasswordDto);
-            
-            if (result.Success)
+            try
             {
-                return Ok(result);
+                var result = await _authService.ResetPasswordAsync(resetPasswordDto);
+                return result.Success ? Ok(result) : BadRequest(result);
             }
-            
-            return BadRequest(result);
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during password reset");
+                return StatusCode(500, BaseResponse.FailureResult("An unexpected error occurred."));
+            }
         }
 
         [HttpPost("change-password")]
@@ -151,21 +169,22 @@ namespace LostAndFound.Api.Controllers
         )]
         public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordDto changePasswordDto)
         {
-            // Get user ID from claims
-            var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier);
-            if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out int userId))
+            try
             {
-                return Unauthorized(new { success = false, message = "User not authenticated" });
-            }
+                var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier);
+                if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out int userId))
+                {
+                    return Unauthorized(BaseResponse.FailureResult("User not authenticated."));
+                }
 
-            var result = await _authService.ChangePasswordAsync(userId, changePasswordDto);
-            
-            if (result.Success)
-            {
-                return Ok(result);
+                var result = await _authService.ChangePasswordAsync(userId, changePasswordDto);
+                return result.Success ? Ok(result) : BadRequest(result);
             }
-            
-            return BadRequest(result);
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during password change");
+                return StatusCode(500, BaseResponse.FailureResult("An unexpected error occurred."));
+            }
         }
 
         [HttpPost("resend-verification")]
@@ -175,14 +194,16 @@ namespace LostAndFound.Api.Controllers
         )]
         public async Task<IActionResult> ResendVerification([FromBody] ResendVerificationDto resendVerificationDto)
         {
-            var result = await _authService.ResendVerificationAsync(resendVerificationDto);
-            
-            if (result.Success)
+            try
             {
-                return Ok(result);
+                var result = await _authService.ResendVerificationAsync(resendVerificationDto);
+                return result.Success ? Ok(result) : BadRequest(result);
             }
-            
-            return BadRequest(result);
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during resend verification");
+                return StatusCode(500, BaseResponse.FailureResult("An unexpected error occurred."));
+            }
         }
 
         [HttpPost("logout")]
@@ -193,21 +214,22 @@ namespace LostAndFound.Api.Controllers
         )]
         public async Task<IActionResult> Logout([FromBody] LogoutDto logoutDto)
         {
-            // Get user ID from claims
-            var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier);
-            if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out int userId))
+            try
             {
-                return Unauthorized(new { success = false, message = "User not authenticated" });
-            }
+                var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier);
+                if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out int userId))
+                {
+                    return Unauthorized(BaseResponse.FailureResult("User not authenticated."));
+                }
 
-            var result = await _authService.LogoutAsync(userId, logoutDto);
-            
-            if (result.Success)
-            {
-                return Ok(result);
+                var result = await _authService.LogoutAsync(userId, logoutDto);
+                return result.Success ? Ok(result) : BadRequest(result);
             }
-            
-            return BadRequest(result);
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during logout");
+                return StatusCode(500, BaseResponse.FailureResult("An unexpected error occurred."));
+            }
         }
 
         [HttpGet("me")]
@@ -218,21 +240,22 @@ namespace LostAndFound.Api.Controllers
         )]
         public async Task<IActionResult> GetCurrentUser()
         {
-            // Get user ID from claims
-            var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier);
-            if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out int userId))
+            try
             {
-                return Unauthorized(new { success = false, message = "User not authenticated" });
-            }
+                var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier);
+                if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out int userId))
+                {
+                    return Unauthorized(BaseResponse.FailureResult("User not authenticated."));
+                }
 
-            var result = await _authService.GetCurrentUserAsync(userId);
-            
-            if (result.Success)
-            {
-                return Ok(result);
+                var result = await _authService.GetCurrentUserAsync(userId);
+                return result.Success ? Ok(result) : NotFound(result);
             }
-            
-            return NotFound(result);
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting current user");
+                return StatusCode(500, BaseResponse.FailureResult("An unexpected error occurred."));
+            }
         }
 
         [HttpPost("change-email-request")]
@@ -243,20 +266,22 @@ namespace LostAndFound.Api.Controllers
         )]
         public async Task<IActionResult> RequestEmailChange([FromBody] ChangeEmailRequestDto dto)
         {
-            var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier);
-            if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out int userId))
+            try
             {
-                return Unauthorized(new { success = false, message = "User not authenticated" });
-            }
+                var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier);
+                if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out int userId))
+                {
+                    return Unauthorized(BaseResponse.FailureResult("User not authenticated."));
+                }
 
-            var result = await _authService.RequestEmailChangeAsync(userId, dto);
-            
-            if (result.Success)
-            {
-                return Ok(result);
+                var result = await _authService.RequestEmailChangeAsync(userId, dto);
+                return result.Success ? Ok(result) : BadRequest(result);
             }
-            
-            return BadRequest(result);
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during email change request");
+                return StatusCode(500, BaseResponse.FailureResult("An unexpected error occurred."));
+            }
         }
 
         [HttpPost("change-email-confirm")]
@@ -267,20 +292,22 @@ namespace LostAndFound.Api.Controllers
         )]
         public async Task<IActionResult> ConfirmEmailChange([FromBody] ChangeEmailConfirmDto dto)
         {
-            var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier);
-            if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out int userId))
+            try
             {
-                return Unauthorized(new { success = false, message = "User not authenticated" });
-            }
+                var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier);
+                if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out int userId))
+                {
+                    return Unauthorized(BaseResponse.FailureResult("User not authenticated."));
+                }
 
-            var result = await _authService.ConfirmEmailChangeAsync(userId, dto);
-            
-            if (result.Success)
-            {
-                return Ok(result);
+                var result = await _authService.ConfirmEmailChangeAsync(userId, dto);
+                return result.Success ? Ok(result) : BadRequest(result);
             }
-            
-            return BadRequest(result);
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during email change confirmation");
+                return StatusCode(500, BaseResponse.FailureResult("An unexpected error occurred."));
+            }
         }
 
         [HttpDelete("delete-account")]
@@ -291,20 +318,22 @@ namespace LostAndFound.Api.Controllers
         )]
         public async Task<IActionResult> DeleteAccount([FromBody] DeleteAccountDto dto)
         {
-            var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier);
-            if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out int userId))
+            try
             {
-                return Unauthorized(new { success = false, message = "User not authenticated" });
-            }
+                var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier);
+                if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out int userId))
+                {
+                    return Unauthorized(BaseResponse.FailureResult("User not authenticated."));
+                }
 
-            var result = await _authService.DeleteAccountAsync(userId, dto);
-            
-            if (result.Success)
-            {
-                return Ok(result);
+                var result = await _authService.DeleteAccountAsync(userId, dto);
+                return result.Success ? Ok(result) : BadRequest(result);
             }
-            
-            return BadRequest(result);
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during account deletion");
+                return StatusCode(500, BaseResponse.FailureResult("An unexpected error occurred."));
+            }
         }
     }
 }

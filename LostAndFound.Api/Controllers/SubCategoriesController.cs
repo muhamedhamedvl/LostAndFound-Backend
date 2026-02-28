@@ -18,11 +18,13 @@ namespace LostAndFound.Api.Controllers
     {
         private readonly IUnitOfWork _unitOfWork;
         private readonly IMapper _mapper;
+        private readonly ILogger<SubCategoriesController> _logger;
 
-        public SubCategoriesController(IUnitOfWork unitOfWork, IMapper mapper)
+        public SubCategoriesController(IUnitOfWork unitOfWork, IMapper mapper, ILogger<SubCategoriesController> logger)
         {
             _unitOfWork = unitOfWork;
             _mapper = mapper;
+            _logger = logger;
         }
 
         [HttpGet]
@@ -40,7 +42,8 @@ namespace LostAndFound.Api.Controllers
             }
             catch (Exception ex)
             {
-                return StatusCode(500, BaseResponse<IEnumerable<SubCategoryDto>>.FailureResult($"Error retrieving subCategories: {ex.Message}"));
+                _logger.LogError(ex, "Error retrieving subcategories");
+                return StatusCode(500, BaseResponse<IEnumerable<SubCategoryDto>>.FailureResult("An unexpected error occurred."));
             }
         }
 
@@ -60,7 +63,8 @@ namespace LostAndFound.Api.Controllers
             }
             catch (Exception ex)
             {
-                return StatusCode(500, BaseResponse<IEnumerable<SubCategoryDto>>.FailureResult($"Error retrieving subCategories: {ex.Message}"));
+                _logger.LogError(ex, "Error retrieving subcategories by category {CategoryId}", categoryId);
+                return StatusCode(500, BaseResponse<IEnumerable<SubCategoryDto>>.FailureResult("An unexpected error occurred."));
             }
         }
 
@@ -86,7 +90,8 @@ namespace LostAndFound.Api.Controllers
             }
             catch (Exception ex)
             {
-                return StatusCode(500, BaseResponse<SubCategoryDto>.FailureResult($"Error retrieving subCategory: {ex.Message}"));
+                _logger.LogError(ex, "Error retrieving subcategory {Id}", id);
+                return StatusCode(500, BaseResponse<SubCategoryDto>.FailureResult("An unexpected error occurred."));
             }
         }
 
@@ -95,10 +100,13 @@ namespace LostAndFound.Api.Controllers
             Summary = "Get reports by subcategory",
             Description = "Retrieves all reports that belong to the specified subcategory. Requires authentication."
         )]
-        public async Task<IActionResult> GetSubCategoryReports(int id)
+        public async Task<IActionResult> GetSubCategoryReports(int id, [FromQuery] int page = 1, [FromQuery] int pageSize = 20)
         {
             try
             {
+                if (page < 1) page = 1;
+                if (pageSize < 1 || pageSize > 100) pageSize = 20;
+
                 var subCategory = await _unitOfWork.SubCategories.GetByIdAsync(id);
                 
                 if (subCategory == null)
@@ -108,13 +116,23 @@ namespace LostAndFound.Api.Controllers
 
                 var reports = await _unitOfWork.Reports.GetAllWithIncludesAsync("SubCategory", "SubCategory.Category", "CreatedBy", "Images");
                 var filteredReports = reports.Where(r => r.SubCategoryId == id).ToList();
+                var totalCount = filteredReports.Count;
+                var paginatedReports = filteredReports.Skip((page - 1) * pageSize).Take(pageSize).ToList();
                 
-                var reportDtos = _mapper.Map<IEnumerable<ReportDto>>(filteredReports);
-                return Ok(BaseResponse<IEnumerable<ReportDto>>.SuccessResult(reportDtos, $"Reports for subcategory '{subCategory.Name}' retrieved successfully"));
+                var reportDtos = _mapper.Map<IEnumerable<ReportDto>>(paginatedReports);
+                return Ok(BaseResponse<object>.SuccessResult(new
+                {
+                    reports = reportDtos,
+                    totalCount,
+                    page,
+                    pageSize,
+                    totalPages = (int)Math.Ceiling((double)totalCount / pageSize)
+                }, $"Reports for subcategory '{subCategory.Name}' retrieved successfully"));
             }
             catch (Exception ex)
             {
-                return StatusCode(500, BaseResponse<object>.FailureResult($"Error retrieving subcategory reports: {ex.Message}"));
+                _logger.LogError(ex, "Error retrieving subcategory reports for {Id}", id);
+                return StatusCode(500, BaseResponse<object>.FailureResult("An unexpected error occurred."));
             }
         }
 
@@ -148,7 +166,8 @@ namespace LostAndFound.Api.Controllers
             }
             catch (Exception ex)
             {
-                return StatusCode(500, BaseResponse<SubCategoryDto>.FailureResult($"Error creating subCategory: {ex.Message}"));
+                _logger.LogError(ex, "Error creating subcategory");
+                return StatusCode(500, BaseResponse<SubCategoryDto>.FailureResult("An unexpected error occurred."));
             }
         }
 
@@ -195,7 +214,8 @@ namespace LostAndFound.Api.Controllers
             }
             catch (Exception ex)
             {
-                return StatusCode(500, BaseResponse<SubCategoryDto>.FailureResult($"Error updating subCategory: {ex.Message}"));
+                _logger.LogError(ex, "Error updating subcategory {Id}", id);
+                return StatusCode(500, BaseResponse<SubCategoryDto>.FailureResult("An unexpected error occurred."));
             }
         }
 
@@ -230,7 +250,8 @@ namespace LostAndFound.Api.Controllers
             }
             catch (Exception ex)
             {
-                return StatusCode(500, BaseResponse<object>.FailureResult($"Error deleting subCategory: {ex.Message}"));
+                _logger.LogError(ex, "Error deleting subcategory {Id}", id);
+                return StatusCode(500, BaseResponse<object>.FailureResult("An unexpected error occurred."));
             }
         }
     }

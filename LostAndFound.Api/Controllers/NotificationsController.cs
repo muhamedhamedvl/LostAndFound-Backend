@@ -59,8 +59,7 @@ namespace LostAndFound.Api.Controllers
         {
             try
             {
-                var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "0");
-                if (userId == 0)
+                if (!int.TryParse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var userId) || userId <= 0)
                     return Unauthorized(BaseResponse<object>.FailureResult("Invalid user token"));
 
                 var (notifications, totalCount) = await _notificationService.GetUserNotificationsAsync(userId, type, category, page, pageSize);
@@ -89,8 +88,7 @@ namespace LostAndFound.Api.Controllers
         {
             try
             {
-                var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "0");
-                if (userId == 0)
+                if (!int.TryParse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var userId) || userId <= 0)
                     return Unauthorized(BaseResponse<object>.FailureResult("Invalid user token"));
 
                 var count = await _notificationService.GetUnreadCountAsync(userId);
@@ -112,8 +110,7 @@ namespace LostAndFound.Api.Controllers
         {
             try
             {
-                var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "0");
-                if (userId == 0)
+                if (!int.TryParse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var userId) || userId <= 0)
                     return Unauthorized(BaseResponse<object>.FailureResult("Invalid user token"));
 
                 await _notificationService.MarkAsReadAsync(id, userId);
@@ -139,8 +136,7 @@ namespace LostAndFound.Api.Controllers
         {
             try
             {
-                var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "0");
-                if (userId == 0)
+                if (!int.TryParse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var userId) || userId <= 0)
                     return Unauthorized(BaseResponse<object>.FailureResult("Invalid user token"));
 
                 var updatedCount = await _notificationService.MarkAllAsReadAsync(userId);
@@ -162,8 +158,7 @@ namespace LostAndFound.Api.Controllers
         {
             try
             {
-                var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "0");
-                if (userId == 0)
+                if (!int.TryParse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var userId) || userId <= 0)
                     return Unauthorized(BaseResponse<object>.FailureResult("Invalid user token"));
 
                 await _notificationService.DeleteNotificationAsync(id, userId);
@@ -189,8 +184,7 @@ namespace LostAndFound.Api.Controllers
         {
             try
             {
-                var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "0");
-                if (userId == 0)
+                if (!int.TryParse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var userId) || userId <= 0)
                     return Unauthorized(BaseResponse<object>.FailureResult("Invalid user token"));
 
                 if (!ModelState.IsValid)

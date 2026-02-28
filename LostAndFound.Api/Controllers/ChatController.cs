@@ -20,12 +20,14 @@ namespace LostAndFound.Api.Controllers
         private readonly IChatService _chatService;
         private readonly IChatHubService _chatHubService;
         private readonly INotificationService _notificationService;
+        private readonly ILogger<ChatController> _logger;
 
-        public ChatController(IChatService chatService, IChatHubService chatHubService, INotificationService notificationService)
+        public ChatController(IChatService chatService, IChatHubService chatHubService, INotificationService notificationService, ILogger<ChatController> logger)
         {
             _chatService = chatService;
             _chatHubService = chatHubService;
             _notificationService = notificationService;
+            _logger = logger;
         }
 
         [HttpGet("sessions")]
@@ -41,13 +43,14 @@ namespace LostAndFound.Api.Controllers
                 var sessions = await _chatService.GetUserSessionsAsync(userId);
                 return Ok(BaseResponse<IEnumerable<ChatSessionSummaryDto>>.SuccessResult(sessions, "Chat sessions retrieved successfully."));
             }
-            catch (UnauthorizedAccessException ex)
+            catch (UnauthorizedAccessException)
             {
-                return Unauthorized(BaseResponse<object>.FailureResult(ex.Message));
+                return Unauthorized(BaseResponse<object>.FailureResult("Unauthorized"));
             }
             catch (Exception ex)
             {
-                return StatusCode(500, BaseResponse<object>.FailureResult($"Failed to load chat sessions: {ex.Message}"));
+                _logger.LogError(ex, "Failed to load chat sessions");
+                return StatusCode(500, BaseResponse<object>.FailureResult("An unexpected error occurred."));
             }
         }
 
@@ -75,21 +78,22 @@ namespace LostAndFound.Api.Controllers
                 }
                 return Ok(BaseResponse<ChatSessionDetailsDto>.SuccessResult(session, "Chat session ready."));
             }
-            catch (ArgumentException ex)
+            catch (ArgumentException)
             {
-                return BadRequest(BaseResponse<object>.FailureResult(ex.Message));
+                return BadRequest(BaseResponse<object>.FailureResult("Invalid request."));
             }
-            catch (KeyNotFoundException ex)
+            catch (KeyNotFoundException)
             {
-                return NotFound(BaseResponse<object>.FailureResult(ex.Message));
+                return NotFound(BaseResponse<object>.FailureResult("Chat session not found."));
             }
-            catch (UnauthorizedAccessException ex)
+            catch (UnauthorizedAccessException)
             {
-                return Unauthorized(BaseResponse<object>.FailureResult(ex.Message));
+                return Unauthorized(BaseResponse<object>.FailureResult("Unauthorized"));
             }
             catch (Exception ex)
             {
-                return StatusCode(500, BaseResponse<object>.FailureResult($"Failed to open chat session: {ex.Message}"));
+                _logger.LogError(ex, "Failed to open chat session with user {OtherUserId}", otherUserId);
+                return StatusCode(500, BaseResponse<object>.FailureResult("An unexpected error occurred."));
             }
         }
 
@@ -106,17 +110,18 @@ namespace LostAndFound.Api.Controllers
                 var session = await _chatService.GetSessionDetailsAsync(sessionId, userId);
                 return Ok(BaseResponse<ChatSessionDetailsDto>.SuccessResult(session, "Chat session loaded."));
             }
-            catch (KeyNotFoundException ex)
+            catch (KeyNotFoundException)
             {
-                return NotFound(BaseResponse<object>.FailureResult(ex.Message));
+                return NotFound(BaseResponse<object>.FailureResult("Chat session not found."));
             }
-            catch (UnauthorizedAccessException ex)
+            catch (UnauthorizedAccessException)
             {
-                return Unauthorized(BaseResponse<object>.FailureResult(ex.Message));
+                return Unauthorized(BaseResponse<object>.FailureResult("Unauthorized"));
             }
             catch (Exception ex)
             {
-                return StatusCode(500, BaseResponse<object>.FailureResult($"Failed to load chat session: {ex.Message}"));
+                _logger.LogError(ex, "Failed to load chat session {SessionId}", sessionId);
+                return StatusCode(500, BaseResponse<object>.FailureResult("An unexpected error occurred."));
             }
         }
 
@@ -133,17 +138,18 @@ namespace LostAndFound.Api.Controllers
                 var messages = await _chatService.GetMessagesAsync(sessionId, userId);
                 return Ok(BaseResponse<IEnumerable<ChatMessageDto>>.SuccessResult(messages, "Messages loaded successfully."));
             }
-            catch (KeyNotFoundException ex)
+            catch (KeyNotFoundException)
             {
-                return NotFound(BaseResponse<object>.FailureResult(ex.Message));
+                return NotFound(BaseResponse<object>.FailureResult("Chat session not found."));
             }
-            catch (UnauthorizedAccessException ex)
+            catch (UnauthorizedAccessException)
             {
-                return Unauthorized(BaseResponse<object>.FailureResult(ex.Message));
+                return Unauthorized(BaseResponse<object>.FailureResult("Unauthorized"));
             }
             catch (Exception ex)
             {
-                return StatusCode(500, BaseResponse<object>.FailureResult($"Failed to load messages: {ex.Message}"));
+                _logger.LogError(ex, "Failed to load messages for session {SessionId}", sessionId);
+                return StatusCode(500, BaseResponse<object>.FailureResult("An unexpected error occurred."));
             }
         }
 
@@ -178,21 +184,22 @@ namespace LostAndFound.Api.Controllers
 
                 return Ok(BaseResponse<ChatMessageDto>.SuccessResult(sentMessage, "Message sent successfully."));
             }
-            catch (ArgumentException ex)
+            catch (ArgumentException)
             {
-                return BadRequest(BaseResponse<object>.FailureResult(ex.Message));
+                return BadRequest(BaseResponse<object>.FailureResult("Invalid request."));
             }
-            catch (KeyNotFoundException ex)
+            catch (KeyNotFoundException)
             {
-                return NotFound(BaseResponse<object>.FailureResult(ex.Message));
+                return NotFound(BaseResponse<object>.FailureResult("Chat session not found."));
             }
-            catch (UnauthorizedAccessException ex)
+            catch (UnauthorizedAccessException)
             {
-                return Unauthorized(BaseResponse<object>.FailureResult(ex.Message));
+                return Unauthorized(BaseResponse<object>.FailureResult("Unauthorized"));
             }
             catch (Exception ex)
             {
-                return StatusCode(500, BaseResponse<object>.FailureResult($"Failed to send message: {ex.Message}"));
+                _logger.LogError(ex, "Failed to send message in session {SessionId}", sessionId);
+                return StatusCode(500, BaseResponse<object>.FailureResult("An unexpected error occurred."));
             }
         }
 
@@ -210,17 +217,18 @@ namespace LostAndFound.Api.Controllers
                 await _chatHubService.NotifyMessageReadAsync(message);
                 return Ok(BaseResponse<ChatMessageDto>.SuccessResult(message, "Message marked as read."));
             }
-            catch (KeyNotFoundException ex)
+            catch (KeyNotFoundException)
             {
-                return NotFound(BaseResponse<object>.FailureResult(ex.Message));
+                return NotFound(BaseResponse<object>.FailureResult("Message not found."));
             }
-            catch (UnauthorizedAccessException ex)
+            catch (UnauthorizedAccessException)
             {
-                return Unauthorized(BaseResponse<object>.FailureResult(ex.Message));
+                return Unauthorized(BaseResponse<object>.FailureResult("Unauthorized"));
             }
             catch (Exception ex)
             {
-                return StatusCode(500, BaseResponse<object>.FailureResult($"Failed to update message: {ex.Message}"));
+                _logger.LogError(ex, "Failed to mark message {MessageId} as read", messageId);
+                return StatusCode(500, BaseResponse<object>.FailureResult("An unexpected error occurred."));
             }
         }
 

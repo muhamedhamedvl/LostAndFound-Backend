@@ -19,11 +19,13 @@ namespace LostAndFound.Api.Controllers
     {
         private readonly IUnitOfWork _unitOfWork;
         private readonly IMapper _mapper;
+        private readonly ILogger<CategoriesController> _logger;
 
-        public CategoriesController(IUnitOfWork unitOfWork, IMapper mapper)
+        public CategoriesController(IUnitOfWork unitOfWork, IMapper mapper, ILogger<CategoriesController> logger)
         {
             _unitOfWork = unitOfWork;
             _mapper = mapper;
+            _logger = logger;
         }
 
         [HttpGet]
@@ -41,7 +43,8 @@ namespace LostAndFound.Api.Controllers
             }
             catch (Exception ex)
             {
-                return StatusCode(500, BaseResponse<IEnumerable<CategoryDto>>.FailureResult($"Error retrieving categories: {ex.Message}"));
+                _logger.LogError(ex, "Error retrieving categories");
+                return StatusCode(500, BaseResponse<IEnumerable<CategoryDto>>.FailureResult("An unexpected error occurred."));
             }
         }
 
@@ -75,7 +78,8 @@ namespace LostAndFound.Api.Controllers
             }
             catch (Exception ex)
             {
-                return StatusCode(500, BaseResponse<List<CategoryTreeDto>>.FailureResult($"Error retrieving category tree: {ex.Message}"));
+                _logger.LogError(ex, "Error retrieving category tree");
+                return StatusCode(500, BaseResponse<List<CategoryTreeDto>>.FailureResult("An unexpected error occurred."));
             }
         }
 
@@ -106,7 +110,8 @@ namespace LostAndFound.Api.Controllers
             }
             catch (Exception ex)
             {
-                return StatusCode(500, BaseResponse<List<CategoryMappingDto>>.FailureResult($"Error retrieving category mapping: {ex.Message}"));
+                _logger.LogError(ex, "Error retrieving category mapping");
+                return StatusCode(500, BaseResponse<List<CategoryMappingDto>>.FailureResult("An unexpected error occurred."));
             }
         }
 
@@ -132,7 +137,8 @@ namespace LostAndFound.Api.Controllers
             }
             catch (Exception ex)
             {
-                return StatusCode(500, BaseResponse<CategoryDto>.FailureResult($"Error retrieving category: {ex.Message}"));
+                _logger.LogError(ex, "Error retrieving category {Id}", id);
+                return StatusCode(500, BaseResponse<CategoryDto>.FailureResult("An unexpected error occurred."));
             }
         }
 
@@ -141,10 +147,13 @@ namespace LostAndFound.Api.Controllers
             Summary = "Get reports by category",
             Description = "Retrieves all reports that belong to subcategories under the specified category. Requires authentication."
         )]
-        public async Task<IActionResult> GetCategoryReports(int id)
+        public async Task<IActionResult> GetCategoryReports(int id, [FromQuery] int page = 1, [FromQuery] int pageSize = 20)
         {
             try
             {
+                if (page < 1) page = 1;
+                if (pageSize < 1 || pageSize > 100) pageSize = 20;
+
                 var category = await _unitOfWork.Categories.GetAllWithIncludesAsync("SubCategories");
                 var foundCategory = category.FirstOrDefault(c => c.Id == id);
                 
@@ -156,13 +165,23 @@ namespace LostAndFound.Api.Controllers
                
                 var allReports = await _unitOfWork.Reports.GetAllWithIncludesAsync("SubCategory", "SubCategory.Category", "CreatedBy", "Images");
                 var reports = allReports.Where(r => subCategoryIds.Contains(r.SubCategoryId)).ToList();
+                var totalCount = reports.Count;
+                var paginatedReports = reports.Skip((page - 1) * pageSize).Take(pageSize).ToList();
                 
-                var reportDtos = _mapper.Map<IEnumerable<ReportDto>>(reports);
-                return Ok(BaseResponse<IEnumerable<ReportDto>>.SuccessResult(reportDtos, $"Reports for category '{foundCategory.Name}' retrieved successfully"));
+                var reportDtos = _mapper.Map<IEnumerable<ReportDto>>(paginatedReports);
+                return Ok(BaseResponse<object>.SuccessResult(new
+                {
+                    reports = reportDtos,
+                    totalCount,
+                    page,
+                    pageSize,
+                    totalPages = (int)Math.Ceiling((double)totalCount / pageSize)
+                }, $"Reports for category '{foundCategory.Name}' retrieved successfully"));
             }
             catch (Exception ex)
             {
-                return StatusCode(500, BaseResponse<object>.FailureResult($"Error retrieving category reports: {ex.Message}"));
+                _logger.LogError(ex, "Error retrieving category reports for {Id}", id);
+                return StatusCode(500, BaseResponse<object>.FailureResult("An unexpected error occurred."));
             }
         }
 
@@ -188,7 +207,8 @@ namespace LostAndFound.Api.Controllers
             }
             catch (Exception ex)
             {
-                return StatusCode(500, BaseResponse<CategoryDto>.FailureResult($"Error creating category: {ex.Message}"));
+                _logger.LogError(ex, "Error creating category");
+                return StatusCode(500, BaseResponse<CategoryDto>.FailureResult("An unexpected error occurred."));
             }
         }
 
@@ -227,7 +247,8 @@ namespace LostAndFound.Api.Controllers
             }
             catch (Exception ex)
             {
-                return StatusCode(500, BaseResponse<CategoryDto>.FailureResult($"Error updating category: {ex.Message}"));
+                _logger.LogError(ex, "Error updating category {Id}", id);
+                return StatusCode(500, BaseResponse<CategoryDto>.FailureResult("An unexpected error occurred."));
             }
         }
 
@@ -263,7 +284,8 @@ namespace LostAndFound.Api.Controllers
             }
             catch (Exception ex)
             {
-                return StatusCode(500, BaseResponse<object>.FailureResult($"Error deleting category: {ex.Message}"));
+                _logger.LogError(ex, "Error deleting category {Id}", id);
+                return StatusCode(500, BaseResponse<object>.FailureResult("An unexpected error occurred."));
             }
         }
     }
