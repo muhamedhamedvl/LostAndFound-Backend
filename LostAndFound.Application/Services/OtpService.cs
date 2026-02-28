@@ -1,14 +1,14 @@
 using LostAndFound.Application.Interfaces;
+using System.Security.Cryptography;
 
 namespace LostAndFound.Application.Services
 {
     public class OtpService : IOtpService
     {
-        private readonly Random _random = new();
-
+        // C4 fix: Use cryptographically secure RNG instead of System.Random
         public string GenerateOtp()
         {
-            return _random.Next(100000, 999999).ToString();
+            return RandomNumberGenerator.GetInt32(100000, 1000000).ToString();
         }
 
         public bool ValidateOtp(string otp, string storedOtp, DateTime? expiry)

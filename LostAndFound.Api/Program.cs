@@ -75,6 +75,12 @@ namespace LostAndFound.Api
                         }
                     });
 
+                    // Include XML comments from the API project for Swagger descriptions
+                    var xmlFilename = $"{System.Reflection.Assembly.GetExecutingAssembly().GetName().Name}.xml";
+                    var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFilename);
+                    if (File.Exists(xmlPath))
+                        c.IncludeXmlComments(xmlPath);
+
                     c.SchemaFilter<SwaggerExcludeFilter>();
                     c.ParameterFilter<FileUploadParameterFilter>();
                     c.OperationFilter<FileUploadOperationFilter>();
@@ -199,14 +205,29 @@ namespace LostAndFound.Api
                         {
                             policy.WithOrigins(allowedOrigins)
                                   .AllowAnyHeader()
-                                  .AllowAnyMethod();
+                                  .AllowAnyMethod()
+                                  .AllowCredentials();
+                        });
+                    }
+                    else if (builder.Environment.IsDevelopment())
+                    {
+                        // Development only: allow any origin for SignalR compatibility.
+                        // SignalR requires AllowCredentials which is incompatible with AllowAnyOrigin.
+                        options.AddPolicy("Configured", policy =>
+                        {
+                            policy.SetIsOriginAllowed(_ => true)
+                                  .AllowAnyHeader()
+                                  .AllowAnyMethod()
+                                  .AllowCredentials();
                         });
                     }
                     else
                     {
+                        // Production with no configured origins: reject all cross-origin requests.
+                        Log.Warning("No CORS origins configured for Production. All cross-origin requests will be rejected.");
                         options.AddPolicy("Configured", policy =>
                         {
-                            policy.AllowAnyOrigin()
+                            policy.SetIsOriginAllowed(_ => false)
                                   .AllowAnyHeader()
                                   .AllowAnyMethod();
                         });
@@ -222,6 +243,14 @@ namespace LostAndFound.Api
                     options.AddFixedWindowLimiter("auth", opt =>
                     {
                         opt.PermitLimit = 5;
+                        opt.Window = TimeSpan.FromMinutes(1);
+                        opt.QueueLimit = 0;
+                    });
+
+                    // Refresh-token: separate higher limit since mobile apps refresh frequently
+                    options.AddFixedWindowLimiter("refresh", opt =>
+                    {
+                        opt.PermitLimit = 20;
                         opt.Window = TimeSpan.FromMinutes(1);
                         opt.QueueLimit = 0;
                     });
