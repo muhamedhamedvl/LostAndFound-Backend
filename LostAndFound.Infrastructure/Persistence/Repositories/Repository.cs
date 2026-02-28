@@ -16,9 +16,14 @@ namespace LostAndFound.Infrastructure.Persistence.Repositories
             _dbSet = context.Set<T>();
         }
 
+        /// <summary>
+        /// Uses FirstOrDefaultAsync instead of FindAsync so that EF Core
+        /// global query filters (e.g. IsDeleted, IsBlocked) are respected.
+        /// FindAsync bypasses query filters because it checks the local cache first.
+        /// </summary>
         public virtual async Task<T?> GetByIdAsync(int id)
         {
-            return await _dbSet.FindAsync(id);
+            return await _dbSet.FirstOrDefaultAsync(e => EF.Property<int>(e, "Id") == id);
         }
 
         public virtual async Task<IEnumerable<T>> GetAllAsync()
