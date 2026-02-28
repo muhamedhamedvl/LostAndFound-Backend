@@ -324,24 +324,18 @@ namespace LostAndFound.Application.Services
             if (!Enum.TryParse<ReportLifecycleStatus>(status, true, out var newLifecycleStatus))
                 return null;
 
-            // Enforce basic lifecycle transitions; admin can always override
+            // C3 fix: Non-admin users can only Close their own reports (withdraw).
+            // Admin-only transitions: Approved, Rejected, Flagged, Archived, Matched.
             if (!isAdmin)
             {
                 var current = report.LifecycleStatus;
                 var allowed = current switch
                 {
-                    ReportLifecycleStatus.Pending => new[]
-                    {
-                        ReportLifecycleStatus.Approved,
-                        ReportLifecycleStatus.Rejected,
-                        ReportLifecycleStatus.Flagged
-                    },
-                    ReportLifecycleStatus.Approved => new[]
-                    {
-                        ReportLifecycleStatus.Matched,
-                        ReportLifecycleStatus.Closed,
-                        ReportLifecycleStatus.Flagged
-                    },
+                    // User can't change Pending — must wait for admin approval
+                    ReportLifecycleStatus.Pending => Array.Empty<ReportLifecycleStatus>(),
+                    // User can close (withdraw) their approved report
+                    ReportLifecycleStatus.Approved => new[] { ReportLifecycleStatus.Closed },
+                    // User can close a matched report
                     ReportLifecycleStatus.Matched => new[] { ReportLifecycleStatus.Closed },
                     _ => Array.Empty<ReportLifecycleStatus>()
                 };

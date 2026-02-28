@@ -5,6 +5,7 @@ using LostAndFound.Application.Interfaces;
 using LostAndFound.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using System.Security.Cryptography;
 
 namespace LostAndFound.Application.Services
@@ -15,34 +16,41 @@ namespace LostAndFound.Application.Services
         private readonly IConfiguration _configuration;
         private readonly IEmailService _emailService;
         private readonly IJwtService _jwtService;
+        private readonly ILogger<AuthService> _logger;
 
-        public AuthService(IUnitOfWork unitOfWork, IConfiguration configuration, IEmailService emailService, IJwtService jwtService)
+        private const int RefreshTokenExpiryDays = 7;
+
+        public AuthService(IUnitOfWork unitOfWork, IConfiguration configuration, IEmailService emailService, IJwtService jwtService, ILogger<AuthService> logger)
         {
             _unitOfWork = unitOfWork;
             _configuration = configuration;
             _emailService = emailService;
             _jwtService = jwtService;
+            _logger = logger;
         }
 
         public async Task<BaseResponse<AuthResponseDto>> LoginAsync(LoginDto loginDto)
         {
             try
             {
+                // Global query filter auto-excludes IsDeleted and IsBlocked users,
+                // so a null result means user doesn't exist OR is deleted/blocked.
                 var user = await _unitOfWork.Users.GetQueryable()
                     .Where(u => u.Email == loginDto.Email)
                     .Include(u => u.UserRoles)
                         .ThenInclude(ur => ur.Role)
                     .FirstOrDefaultAsync();
 
-                if (user == null || !BCrypt.Net.BCrypt.Verify(loginDto.Password, user.PasswordHash))
+                if (user == null)
                 {
+                    // Perform a dummy hash to prevent timing attacks that reveal user existence
+                    BCrypt.Net.BCrypt.Verify("dummy", BCrypt.Net.BCrypt.HashPassword("dummy"));
                     return BaseResponse<AuthResponseDto>.FailureResult("Invalid email or password");
                 }
 
-                // Prevent deleted users from logging in
-                if (user.IsDeleted)
+                if (!BCrypt.Net.BCrypt.Verify(loginDto.Password, user.PasswordHash))
                 {
-                    return BaseResponse<AuthResponseDto>.FailureResult("This account has been deleted");
+                    return BaseResponse<AuthResponseDto>.FailureResult("Invalid email or password");
                 }
 
                 if (!user.IsVerified)
@@ -52,22 +60,34 @@ namespace LostAndFound.Application.Services
 
                 var userDto = MapToUserDto(user);
                 var accessToken = await _jwtService.GenerateAccessTokenAsync(userDto);
-                var refreshToken = await _jwtService.GenerateRefreshTokenAsync();
+                var refreshTokenStr = await _jwtService.GenerateRefreshTokenAsync();
 
-                // Save refresh token to database
-                user.RefreshToken = refreshToken;
-                user.RefreshTokenExpiry = DateTime.UtcNow.AddDays(7); // 7 days expiry
+                // Save refresh token to the new RefreshTokens table (multi-device)
+                var refreshTokenEntity = new RefreshToken
+                {
+                    Token = refreshTokenStr,
+                    ExpiresAt = DateTime.UtcNow.AddDays(RefreshTokenExpiryDays),
+                    CreatedAt = DateTime.UtcNow,
+                    UserId = user.Id,
+                    DeviceInfo = null // Can be set from request headers in the future
+                };
+                await _unitOfWork.RefreshTokens.AddAsync(refreshTokenEntity);
+
+                // Opportunistic cleanup: remove expired/revoked tokens for this user
+                await CleanupExpiredTokensAsync(user.Id);
+
+                // Keep legacy fields in sync for backward compatibility
+                user.RefreshToken = refreshTokenStr;
+                user.RefreshTokenExpiry = refreshTokenEntity.ExpiresAt;
                 await _unitOfWork.SaveChangesAsync();
 
-                var jwtSettings = _configuration.GetSection("JwtSettings");
-                var expiryMinutes = int.Parse(jwtSettings["ExpiryMinutes"] ?? "60");
-                var expiresAt = DateTime.UtcNow.AddMinutes(expiryMinutes);
+                var expiresAt = GetAccessTokenExpiry();
 
                 var authResponse = new AuthResponseDto
                 {
                     User = userDto,
                     AccessToken = accessToken,
-                    RefreshToken = refreshToken,
+                    RefreshToken = refreshTokenStr,
                     ExpiresAt = expiresAt
                 };
 
@@ -75,7 +95,8 @@ namespace LostAndFound.Application.Services
             }
             catch (Exception ex)
             {
-                return BaseResponse<AuthResponseDto>.FailureResult($"Login failed: {ex.Message}");
+                _logger.LogError(ex, "Login failed for {Email}", loginDto.Email);
+                return BaseResponse<AuthResponseDto>.FailureResult("An unexpected error occurred.");
             }
         }
 
@@ -111,7 +132,10 @@ namespace LostAndFound.Application.Services
                     : payload.Email ?? "User");
                 var picture = payload.Picture;
 
+                // Use IgnoreQueryFilters to find blocked/deleted accounts linked to this Google ID,
+                // so we can reject them instead of creating a duplicate user.
                 var user = await _unitOfWork.Users.GetQueryable()
+                    .IgnoreQueryFilters()
                     .Where(u => u.GoogleId == googleId || u.Email == email)
                     .Include(u => u.UserRoles)
                         .ThenInclude(ur => ur.Role)
@@ -119,9 +143,10 @@ namespace LostAndFound.Application.Services
 
                 if (user != null)
                 {
-                    if (user.IsDeleted)
+                    // Reject deleted/blocked users with generic message
+                    if (user.IsDeleted || user.IsBlocked)
                     {
-                        return BaseResponse<AuthResponseDto>.FailureResult("This account has been deleted");
+                        return BaseResponse<AuthResponseDto>.FailureResult("Authentication failed");
                     }
                     // Link Google account if they signed up with email first
                     if (string.IsNullOrEmpty(user.GoogleId))
@@ -170,40 +195,52 @@ namespace LostAndFound.Application.Services
 
                 var userDto = MapToUserDto(user);
                 var accessToken = await _jwtService.GenerateAccessTokenAsync(userDto);
-                var refreshToken = await _jwtService.GenerateRefreshTokenAsync();
+                var refreshTokenStr = await _jwtService.GenerateRefreshTokenAsync();
 
-                user.RefreshToken = refreshToken;
-                user.RefreshTokenExpiry = DateTime.UtcNow.AddDays(7);
+                // Multi-device refresh token
+                var refreshTokenEntity = new RefreshToken
+                {
+                    Token = refreshTokenStr,
+                    ExpiresAt = DateTime.UtcNow.AddDays(RefreshTokenExpiryDays),
+                    CreatedAt = DateTime.UtcNow,
+                    UserId = user.Id
+                };
+                await _unitOfWork.RefreshTokens.AddAsync(refreshTokenEntity);
+
+                // Keep legacy fields in sync
+                user.RefreshToken = refreshTokenStr;
+                user.RefreshTokenExpiry = refreshTokenEntity.ExpiresAt;
                 await _unitOfWork.SaveChangesAsync();
-
-                var jwtSettings = _configuration.GetSection("JwtSettings");
-                var expiryMinutes = int.Parse(jwtSettings["ExpiryMinutes"] ?? "60");
-                var expiresAt = DateTime.UtcNow.AddMinutes(expiryMinutes);
 
                 var authResponse = new AuthResponseDto
                 {
                     User = userDto,
                     AccessToken = accessToken,
-                    RefreshToken = refreshToken,
-                    ExpiresAt = expiresAt
+                    RefreshToken = refreshTokenStr,
+                    ExpiresAt = GetAccessTokenExpiry()
                 };
 
                 return BaseResponse<AuthResponseDto>.SuccessResult(authResponse, "Signed in with Google successfully");
             }
             catch (Exception ex)
             {
-                return BaseResponse<AuthResponseDto>.FailureResult($"Google sign-in failed: {ex.Message}");
+                _logger.LogError(ex, "Google sign-in failed");
+                return BaseResponse<AuthResponseDto>.FailureResult("An unexpected error occurred.");
             }
         }
 
-        public async Task<BaseResponse<AuthResponseDto>> SignupAsync(SignupDto signupDto)
+        /// <summary>
+        /// Registers a new user account. Does NOT issue JWT/refresh tokens —
+        /// the user must verify their email first via VerifyAccountAsync, then log in.
+        /// </summary>
+        public async Task<BaseResponse> SignupAsync(SignupDto signupDto)
         {
             try
             {
                 var existingUser = await _unitOfWork.Users.FirstOrDefaultAsync(u => u.Email == signupDto.Email);
                 if (existingUser != null)
                 {
-                    return BaseResponse<AuthResponseDto>.FailureResult("User with this email already exists");
+                    return BaseResponse.FailureResult("User with this email already exists");
                 }
 
                 var verificationCode = GenerateVerificationCode();
@@ -239,40 +276,17 @@ namespace LostAndFound.Application.Services
 
                 await _emailService.SendVerificationCodeEmailAsync(user.Email, user.FullName, verificationCode);
 
-                user = await _unitOfWork.Users.GetQueryable()
-                    .Where(u => u.Id == user.Id)
-                    .Include(u => u.UserRoles)
-                        .ThenInclude(ur => ur.Role)
-                    .FirstOrDefaultAsync() ?? user;
-
-                var userDto = MapToUserDto(user);
-                var accessToken = await _jwtService.GenerateAccessTokenAsync(userDto);
-                var refreshToken = await _jwtService.GenerateRefreshTokenAsync();
-
-                // Save refresh token to database
-                user.RefreshToken = refreshToken;
-                user.RefreshTokenExpiry = DateTime.UtcNow.AddDays(7); // 7 days expiry
-                await _unitOfWork.SaveChangesAsync();
-
-                var jwtSettings = _configuration.GetSection("JwtSettings");
-                var expiryMinutes = int.Parse(jwtSettings["ExpiryMinutes"] ?? "60");
-                var expiresAt = DateTime.UtcNow.AddMinutes(expiryMinutes);
-
-                var authResponse = new AuthResponseDto
-                {
-                    User = userDto,
-                    AccessToken = accessToken,
-                    RefreshToken = refreshToken,
-                    ExpiresAt = expiresAt
-                };
-
-                return BaseResponse<AuthResponseDto>.SuccessResult(authResponse, "Registration successful. Please check your email to verify your account.");
+                // Security: Do NOT issue JWT or refresh token before email verification.
+                // The user must verify their email, then log in to receive tokens.
+                return BaseResponse.SuccessResult("Registration successful. Please check your email to verify your account.");
             }
             catch (Exception ex)
             {
-                return BaseResponse<AuthResponseDto>.FailureResult($"Registration failed: {ex.Message}");
+                _logger.LogError(ex, "Registration failed for {Email}", signupDto.Email);
+                return BaseResponse.FailureResult("An unexpected error occurred.");
             }
         }
+
         public async Task<BaseResponse> VerifyAccountAsync(VerifyAccountDto verifyAccountDto)
         {
             try
@@ -280,7 +294,8 @@ namespace LostAndFound.Application.Services
                 var user = await _unitOfWork.Users.FirstOrDefaultAsync(u => u.Email == verifyAccountDto.Email);
                 if (user == null)
                 {
-                    return BaseResponse.FailureResult("User not found");
+                    // Generic message — do not confirm whether the email exists
+                    return BaseResponse.FailureResult("Invalid or expired verification code");
                 }
 
                 if (user.VerificationCode != verifyAccountDto.Code || 
@@ -299,7 +314,8 @@ namespace LostAndFound.Application.Services
             }
             catch (Exception ex)
             {
-                return BaseResponse.FailureResult($"Account verification failed: {ex.Message}");
+                _logger.LogError(ex, "Account verification failed");
+                return BaseResponse.FailureResult("An unexpected error occurred.");
             }
         }
 
@@ -307,49 +323,72 @@ namespace LostAndFound.Application.Services
         {
             try
             {
-                var user = await _unitOfWork.Users.GetQueryable()
-                    .Where(u => u.RefreshToken == refreshTokenDto.RefreshToken)
-                    .Include(u => u.UserRoles)
-                        .ThenInclude(ur => ur.Role)
+                // Look up the token in the RefreshTokens table (multi-device)
+                // Use IgnoreQueryFilters so the included User is loaded even if blocked/deleted,
+                // allowing us to explicitly reject and revoke their token.
+                var storedToken = await _unitOfWork.RefreshTokens.GetQueryable()
+                    .IgnoreQueryFilters()
+                    .Where(rt => rt.Token == refreshTokenDto.RefreshToken && rt.RevokedAt == null)
+                    .Include(rt => rt.User)
+                        .ThenInclude(u => u.UserRoles)
+                            .ThenInclude(ur => ur.Role)
                     .FirstOrDefaultAsync();
 
-                if (user == null)
+                if (storedToken == null || storedToken.ExpiresAt <= DateTime.UtcNow)
                 {
-                    return BaseResponse<AuthResponseDto>.FailureResult("Invalid refresh token");
+                    return BaseResponse<AuthResponseDto>.FailureResult("Invalid or expired refresh token");
                 }
 
-                if (user.RefreshTokenExpiry == null || user.RefreshTokenExpiry <= DateTime.UtcNow)
+                var user = storedToken.User;
+
+                // Prevent deleted/blocked users from refreshing
+                if (user.IsDeleted || user.IsBlocked)
                 {
-                    return BaseResponse<AuthResponseDto>.FailureResult("Refresh token has expired");
+                    // Revoke this token
+                    storedToken.RevokedAt = DateTime.UtcNow;
+                    await _unitOfWork.SaveChangesAsync();
+                    return BaseResponse<AuthResponseDto>.FailureResult("Authentication failed");
                 }
 
-                // Generate new tokens
-                var userDto = MapToUserDto(user);
-                var accessToken = await _jwtService.GenerateAccessTokenAsync(userDto);
-                var newRefreshToken = await _jwtService.GenerateRefreshTokenAsync();
+                // Rotate: revoke old token, issue new one
+                storedToken.RevokedAt = DateTime.UtcNow;
 
-                // Update refresh token in database
-                user.RefreshToken = newRefreshToken;
-                user.RefreshTokenExpiry = DateTime.UtcNow.AddDays(7);
+                var newRefreshTokenStr = await _jwtService.GenerateRefreshTokenAsync();
+                var newRefreshTokenEntity = new RefreshToken
+                {
+                    Token = newRefreshTokenStr,
+                    ExpiresAt = DateTime.UtcNow.AddDays(RefreshTokenExpiryDays),
+                    CreatedAt = DateTime.UtcNow,
+                    UserId = user.Id,
+                    DeviceInfo = storedToken.DeviceInfo // preserve device info
+                };
+                await _unitOfWork.RefreshTokens.AddAsync(newRefreshTokenEntity);
+
+                // Opportunistic cleanup: remove expired/revoked tokens for this user
+                await CleanupExpiredTokensAsync(user.Id);
+
+                // Keep legacy fields in sync
+                user.RefreshToken = newRefreshTokenStr;
+                user.RefreshTokenExpiry = newRefreshTokenEntity.ExpiresAt;
                 await _unitOfWork.SaveChangesAsync();
 
-                var jwtSettings = _configuration.GetSection("JwtSettings");
-                var expiryMinutes = int.Parse(jwtSettings["ExpiryMinutes"] ?? "60");
-                var expiresAt = DateTime.UtcNow.AddMinutes(expiryMinutes);
+                var userDto = MapToUserDto(user);
+                var accessToken = await _jwtService.GenerateAccessTokenAsync(userDto);
 
                 var authResponse = new AuthResponseDto
                 {
                     User = userDto,
                     AccessToken = accessToken,
-                    RefreshToken = newRefreshToken,
-                    ExpiresAt = expiresAt
+                    RefreshToken = newRefreshTokenStr,
+                    ExpiresAt = GetAccessTokenExpiry()
                 };
 
                 return BaseResponse<AuthResponseDto>.SuccessResult(authResponse, "Token refreshed successfully");
             }
             catch (Exception ex)
             {
-                return BaseResponse<AuthResponseDto>.FailureResult($"Token refresh failed: {ex.Message}");
+                _logger.LogError(ex, "Token refresh failed");
+                return BaseResponse<AuthResponseDto>.FailureResult("An unexpected error occurred.");
             }
         }
 
@@ -377,7 +416,8 @@ namespace LostAndFound.Application.Services
             }
             catch (Exception ex)
             {
-                return BaseResponse.FailureResult($"Failed to send password reset email: {ex.Message}");
+                _logger.LogError(ex, "Failed to send password reset email");
+                return BaseResponse.FailureResult("An unexpected error occurred.");
             }
         }
 
@@ -403,7 +443,10 @@ namespace LostAndFound.Application.Services
                 user.PasswordResetToken = null;
                 user.PasswordResetTokenExpiry = null;
                 
-                // Invalidate all refresh tokens for security
+                // Invalidate ALL refresh tokens for security (multi-device)
+                await RevokeAllUserRefreshTokensAsync(user.Id);
+
+                // Clear legacy fields
                 user.RefreshToken = null;
                 user.RefreshTokenExpiry = null;
                 
@@ -413,7 +456,8 @@ namespace LostAndFound.Application.Services
             }
             catch (Exception ex)
             {
-                return BaseResponse.FailureResult($"Password reset failed: {ex.Message}");
+                _logger.LogError(ex, "Password reset failed");
+                return BaseResponse.FailureResult("An unexpected error occurred.");
             }
         }
 
@@ -424,7 +468,7 @@ namespace LostAndFound.Application.Services
                 var user = await _unitOfWork.Users.FirstOrDefaultAsync(u => u.Id == userId);
                 if (user == null)
                 {
-                    return BaseResponse.FailureResult("User not found");
+                    return BaseResponse.FailureResult("Authentication failed");
                 }
 
                 // Verify current password
@@ -436,7 +480,10 @@ namespace LostAndFound.Application.Services
                 // Update to new password
                 user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(changePasswordDto.NewPassword);
                 
-                // Invalidate all refresh tokens for security
+                // Invalidate ALL refresh tokens for security (multi-device)
+                await RevokeAllUserRefreshTokensAsync(user.Id);
+
+                // Clear legacy fields
                 user.RefreshToken = null;
                 user.RefreshTokenExpiry = null;
                 
@@ -446,7 +493,8 @@ namespace LostAndFound.Application.Services
             }
             catch (Exception ex)
             {
-                return BaseResponse.FailureResult($"Password change failed: {ex.Message}");
+                _logger.LogError(ex, "Password change failed for user {UserId}", userId);
+                return BaseResponse.FailureResult("An unexpected error occurred.");
             }
         }
 
@@ -457,12 +505,14 @@ namespace LostAndFound.Application.Services
                 var user = await _unitOfWork.Users.FirstOrDefaultAsync(u => u.Email == resendVerificationDto.Email);
                 if (user == null)
                 {
-                    return BaseResponse.FailureResult("User not found");
+                    // Generic message — do not confirm whether the email exists
+                    return BaseResponse.SuccessResult("If the email exists and is not yet verified, a new verification code has been sent");
                 }
 
                 if (user.IsVerified)
                 {
-                    return BaseResponse.FailureResult("Account is already verified");
+                    // Same generic message — do not reveal that the account is already verified
+                    return BaseResponse.SuccessResult("If the email exists and is not yet verified, a new verification code has been sent");
                 }
 
                 // Generate new verification code
@@ -474,11 +524,12 @@ namespace LostAndFound.Application.Services
                 // Send verification email
                 await _emailService.SendVerificationCodeEmailAsync(user.Email, user.FullName, verificationCode);
 
-                return BaseResponse.SuccessResult("Verification code has been resent to your email");
+                return BaseResponse.SuccessResult("If the email exists and is not yet verified, a new verification code has been sent");
             }
             catch (Exception ex)
             {
-                return BaseResponse.FailureResult($"Failed to resend verification code: {ex.Message}");
+                _logger.LogError(ex, "Failed to resend verification code");
+                return BaseResponse.FailureResult("An unexpected error occurred.");
             }
         }
 
@@ -486,28 +537,31 @@ namespace LostAndFound.Application.Services
         {
             try
             {
+                // Revoke the specific refresh token in the new table
+                var storedToken = await _unitOfWork.RefreshTokens.FirstOrDefaultAsync(
+                    rt => rt.UserId == userId && rt.Token == logoutDto.RefreshToken && rt.RevokedAt == null);
+
+                if (storedToken != null)
+                {
+                    storedToken.RevokedAt = DateTime.UtcNow;
+                }
+
+                // Also clear legacy fields if the token matches
                 var user = await _unitOfWork.Users.FirstOrDefaultAsync(u => u.Id == userId);
-                if (user == null)
+                if (user != null && user.RefreshToken == logoutDto.RefreshToken)
                 {
-                    return BaseResponse.FailureResult("User not found");
+                    user.RefreshToken = null;
+                    user.RefreshTokenExpiry = null;
                 }
 
-                // Verify that the refresh token matches
-                if (user.RefreshToken != logoutDto.RefreshToken)
-                {
-                    return BaseResponse.FailureResult("Invalid refresh token");
-                }
-
-                // Invalidate the refresh token
-                user.RefreshToken = null;
-                user.RefreshTokenExpiry = null;
                 await _unitOfWork.SaveChangesAsync();
 
                 return BaseResponse.SuccessResult("Logged out successfully");
             }
             catch (Exception ex)
             {
-                return BaseResponse.FailureResult($"Logout failed: {ex.Message}");
+                _logger.LogError(ex, "Logout failed for user {UserId}", userId);
+                return BaseResponse.FailureResult("An unexpected error occurred.");
             }
         }
 
@@ -516,14 +570,14 @@ namespace LostAndFound.Application.Services
             try
             {
                 var user = await _unitOfWork.Users.GetQueryable()
-                    .Where(u => u.Id == userId)
+                    .Where(u => u.Id == userId && !u.IsDeleted && !u.IsBlocked)
                     .Include(u => u.UserRoles)
                         .ThenInclude(ur => ur.Role)
                     .FirstOrDefaultAsync();
 
                 if (user == null)
                 {
-                    return BaseResponse<UserDto>.FailureResult("User not found");
+                    return BaseResponse<UserDto>.FailureResult("Authentication failed");
                 }
 
                 var userDto = MapToUserDto(user);
@@ -531,7 +585,8 @@ namespace LostAndFound.Application.Services
             }
             catch (Exception ex)
             {
-                return BaseResponse<UserDto>.FailureResult($"Failed to retrieve user: {ex.Message}");
+                _logger.LogError(ex, "Failed to retrieve user {UserId}", userId);
+                return BaseResponse<UserDto>.FailureResult("An unexpected error occurred.");
             }
         }
 
@@ -542,7 +597,7 @@ namespace LostAndFound.Application.Services
                 var user = await _unitOfWork.Users.FirstOrDefaultAsync(u => u.Id == userId);
                 if (user == null)
                 {
-                    return BaseResponse.FailureResult("User not found");
+                    return BaseResponse.FailureResult("Authentication failed");
                 }
 
                 var existingUser = await _unitOfWork.Users.FirstOrDefaultAsync(u => u.Email == dto.NewEmail);
@@ -563,7 +618,8 @@ namespace LostAndFound.Application.Services
             }
             catch (Exception ex)
             {
-                return BaseResponse.FailureResult($"Failed to request email change: {ex.Message}");
+                _logger.LogError(ex, "Failed to request email change for user {UserId}", userId);
+                return BaseResponse.FailureResult("An unexpected error occurred.");
             }
         }
 
@@ -574,7 +630,7 @@ namespace LostAndFound.Application.Services
                 var user = await _unitOfWork.Users.FirstOrDefaultAsync(u => u.Id == userId);
                 if (user == null)
                 {
-                    return BaseResponse.FailureResult("User not found");
+                    return BaseResponse.FailureResult("Authentication failed");
                 }
 
                 if (user.EmailChangeToken != dto.VerificationCode ||
@@ -593,6 +649,9 @@ namespace LostAndFound.Application.Services
                 user.EmailChangeToken = null;
                 user.EmailChangeTokenExpiry = null;
                 user.PendingEmail = null;
+
+                // Invalidate ALL refresh tokens for security (multi-device)
+                await RevokeAllUserRefreshTokensAsync(user.Id);
                 user.RefreshToken = null;
                 user.RefreshTokenExpiry = null;
 
@@ -602,7 +661,8 @@ namespace LostAndFound.Application.Services
             }
             catch (Exception ex)
             {
-                return BaseResponse.FailureResult($"Failed to confirm email change: {ex.Message}");
+                _logger.LogError(ex, "Failed to confirm email change for user {UserId}", userId);
+                return BaseResponse.FailureResult("An unexpected error occurred.");
             }
         }
 
@@ -613,7 +673,7 @@ namespace LostAndFound.Application.Services
                 var user = await _unitOfWork.Users.FirstOrDefaultAsync(u => u.Id == userId);
                 if (user == null)
                 {
-                    return BaseResponse.FailureResult("User not found");
+                    return BaseResponse.FailureResult("Authentication failed");
                 }
 
                 if (!BCrypt.Net.BCrypt.Verify(dto.Password, user.PasswordHash))
@@ -623,6 +683,9 @@ namespace LostAndFound.Application.Services
 
                 user.IsDeleted = true;
                 user.DeletedAt = DateTime.UtcNow;
+
+                // Invalidate ALL refresh tokens for security (multi-device)
+                await RevokeAllUserRefreshTokensAsync(user.Id);
                 user.RefreshToken = null;
                 user.RefreshTokenExpiry = null;
 
@@ -632,8 +695,59 @@ namespace LostAndFound.Application.Services
             }
             catch (Exception ex)
             {
-                return BaseResponse.FailureResult($"Failed to delete account: {ex.Message}");
+                _logger.LogError(ex, "Failed to delete account for user {UserId}", userId);
+                return BaseResponse.FailureResult("An unexpected error occurred.");
             }
+        }
+
+        // ── Helpers ──────────────────────────────────────────────
+
+        /// <summary>
+        /// Removes expired and revoked refresh tokens for a user to keep the DB clean.
+        /// Called opportunistically during login and token refresh — no background service needed.
+        /// </summary>
+        private async Task CleanupExpiredTokensAsync(int userId)
+        {
+            try
+            {
+                var staleTokens = await _unitOfWork.RefreshTokens.GetQueryable()
+                    .Where(rt => rt.UserId == userId &&
+                        (rt.ExpiresAt < DateTime.UtcNow || rt.RevokedAt != null))
+                    .ToListAsync();
+
+                if (staleTokens.Count > 0)
+                {
+                    await _unitOfWork.RefreshTokens.DeleteRangeAsync(staleTokens);
+                    // SaveChanges is called by the caller after this method
+                }
+            }
+            catch (Exception ex)
+            {
+                // Non-critical: log and swallow so it never breaks login/refresh
+                _logger.LogWarning(ex, "Token cleanup failed for user {UserId}", userId);
+            }
+        }
+
+        /// <summary>
+        /// Revokes all active refresh tokens for a given user (multi-device invalidation).
+        /// </summary>
+        private async Task RevokeAllUserRefreshTokensAsync(int userId)
+        {
+            var activeTokens = await _unitOfWork.RefreshTokens.GetQueryable()
+                .Where(rt => rt.UserId == userId && rt.RevokedAt == null)
+                .ToListAsync();
+
+            foreach (var token in activeTokens)
+            {
+                token.RevokedAt = DateTime.UtcNow;
+            }
+        }
+
+        private DateTime GetAccessTokenExpiry()
+        {
+            var jwtSettings = _configuration.GetSection("JwtSettings");
+            var expiryMinutes = int.Parse(jwtSettings["ExpiryMinutes"] ?? "60");
+            return DateTime.UtcNow.AddMinutes(expiryMinutes);
         }
 
         private UserDto MapToUserDto(AppUser user)

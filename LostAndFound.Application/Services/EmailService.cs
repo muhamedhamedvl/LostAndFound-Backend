@@ -1,5 +1,6 @@
 using LostAndFound.Application.Interfaces;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using MimeKit;
 using MailKit.Net.Smtp;
 using System.Text;
@@ -14,24 +15,21 @@ namespace LostAndFound.Application.Services
     public class EmailService : IEmailService
     {
         private readonly IConfiguration _configuration;
+        private readonly ILogger<EmailService> _logger;
         
         // Retry configuration for SMTP throttling
         private const int MaxRetryAttempts = 3;
         private const int RetryDelayMs = 2000; 
 
-        public EmailService(IConfiguration configuration)
+        public EmailService(IConfiguration configuration, ILogger<EmailService> logger)
         {
             _configuration = configuration;
+            _logger = logger;
         }
 
         /// <summary>
         /// Sends an email with improved headers and SMTP configuration for better deliverability.
         /// </summary>
-        /// <param name="to">Recipient email address</param>
-        /// <param name="subject">Email subject</param>
-        /// <param name="body">Email body (HTML or plain text)</param>
-        /// <param name="isHtml">Whether the body is HTML format</param>
-        /// <returns>True if email sent successfully, false otherwise</returns>
         public async Task<bool> SendEmailAsync(string to, string subject, string body, bool isHtml = true)
         {
             try
@@ -46,7 +44,7 @@ namespace LostAndFound.Application.Services
                 if (string.IsNullOrWhiteSpace(smtpServer) || string.IsNullOrWhiteSpace(smtpUsername) || 
                     string.IsNullOrWhiteSpace(smtpPassword) || string.IsNullOrWhiteSpace(fromEmail))
                 {
-                    Console.WriteLine("[ERROR] Email configuration is incomplete. Missing required SMTP settings.");
+                    _logger.LogError("Email configuration is incomplete. Missing required SMTP settings.");
                     return false;
                 }
 
@@ -82,23 +80,13 @@ namespace LostAndFound.Application.Services
                 
                 message.Body = bodyBuilder.ToMessageBody();
 
-                Console.WriteLine($"[EMAIL] Attempting to send email to: {to}");
-                Console.WriteLine($"[EMAIL] SMTP Server: {smtpServer}:{smtpPort}");
-                Console.WriteLine($"[EMAIL] From: {fromName} <{fromEmail}>");
+                _logger.LogInformation("Attempting to send email to {Recipient}", to);
 
                 return await SendEmailWithRetryAsync(message, smtpServer, smtpPort, smtpUsername, smtpPassword, to);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ERROR] Email sending failed: {ex.Message}");
-                Console.WriteLine($"[ERROR] Exception Type: {ex.GetType().Name}");
-                Console.WriteLine($"[ERROR] Stack Trace: {ex.StackTrace}");
-                
-                if (ex.InnerException != null)
-                {
-                    Console.WriteLine($"[ERROR] Inner Exception: {ex.InnerException.Message}");
-                }
-                
+                _logger.LogError(ex, "Email sending failed for recipient {Recipient}", to);
                 return false;
             }
         }
@@ -119,7 +107,7 @@ namespace LostAndFound.Application.Services
             {
                 try
                 {
-                    Console.WriteLine($"[EMAIL] Attempt {attempt} of {MaxRetryAttempts}");
+                    _logger.LogDebug("Email send attempt {Attempt} of {MaxAttempts} to {Recipient}", attempt, MaxRetryAttempts, recipientEmail);
 
                     using var client = new SmtpClient();
                     var secureSocketOptions = smtpPort == 465 
@@ -128,44 +116,39 @@ namespace LostAndFound.Application.Services
                     await client.ConnectAsync(smtpServer, smtpPort, secureSocketOptions);
                     await client.AuthenticateAsync(smtpUsername, smtpPassword);
                     
-                    // Send the message
                     await client.SendAsync(message);
                     
-                    // Disconnect gracefully
                     await client.DisconnectAsync(true);
 
-                    Console.WriteLine($"[EMAIL] Email sent successfully to: {recipientEmail}");
+                    _logger.LogInformation("Email sent successfully to {Recipient}", recipientEmail);
                     return true;
                 }
                 catch (SmtpCommandException ex) when (ex.StatusCode == SmtpStatusCode.ServiceNotAvailable || 
-                                                      ex.Message.Contains("throttle", StringComparison.OrdinalIgnoreCase) ||
-                                                      ex.Message.Contains("rate limit", StringComparison.OrdinalIgnoreCase) ||
-                                                      ex.Message.Contains("temporarily unavailable", StringComparison.OrdinalIgnoreCase))
+                                                       ex.Message.Contains("throttle", StringComparison.OrdinalIgnoreCase) ||
+                                                       ex.Message.Contains("rate limit", StringComparison.OrdinalIgnoreCase) ||
+                                                       ex.Message.Contains("temporarily unavailable", StringComparison.OrdinalIgnoreCase))
                 {
-                    // SMTP server is throttling or temporarily unavailable
                     lastException = ex;
-                    Console.WriteLine($"[EMAIL] SMTP server throttling detected (attempt {attempt}/{MaxRetryAttempts}): {ex.Message}");
+                    _logger.LogWarning("SMTP throttling detected (attempt {Attempt}/{MaxAttempts}) for {Recipient}", attempt, MaxRetryAttempts, recipientEmail);
                     
                     if (attempt < MaxRetryAttempts)
                     {
                         var delay = RetryDelayMs * attempt;
-                        Console.WriteLine($"[EMAIL] Waiting {delay}ms before retry...");
                         await Task.Delay(delay);
                     }
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[ERROR] Non-retryable error: {ex.Message}");
+                    _logger.LogError(ex, "Non-retryable email error for {Recipient}", recipientEmail);
                     throw;
                 }
             }
-            Console.WriteLine($"[ERROR] Failed to send email after {MaxRetryAttempts} attempts. Last error: {lastException?.Message}");
+            _logger.LogError(lastException, "Failed to send email after {MaxAttempts} attempts to {Recipient}", MaxRetryAttempts, recipientEmail);
             return false;
         }
 
         /// <summary>
         /// Converts HTML to plain text for multipart/alternative email format.
-        /// Simple conversion that removes HTML tags and preserves basic structure.
         /// </summary>
         private string ConvertHtmlToPlainText(string html)
         {
@@ -194,33 +177,19 @@ namespace LostAndFound.Application.Services
 
         /// <summary>
         /// Sends a verification code email with improved template and formatting.
-        /// Uses a clean, simple design to avoid Gmail phishing warnings.
         /// </summary>
-        /// <param name="to">Recipient email address</param>
-        /// <param name="name">Recipient's full name</param>
-        /// <param name="verificationCode">6-digit verification code</param>
-        /// <returns>True if email sent successfully, false otherwise</returns>
         public async Task<bool> SendVerificationCodeEmailAsync(string to, string name, string verificationCode)
         {
             var subject = "Your Lost & Found Verification Code";
-            
-            Console.WriteLine("[EMAIL] === VERIFICATION EMAIL ===");
-            Console.WriteLine($"[EMAIL] To: {to}");
-            Console.WriteLine($"[EMAIL] Name: {name}");
-            Console.WriteLine($"[EMAIL] Verification Code: {verificationCode}");
-            Console.WriteLine("[EMAIL] ==========================");
 
-            // Get sender email for footer
+            // C5 fix: removed Console.WriteLine that leaked verification codes
+
             var emailSettings = _configuration.GetSection("EmailSettings");
             var contactEmail = emailSettings["From"] ?? emailSettings["FromEmail"] ?? "lost.found2026@gmail.com";
 
-            // Generate HTML email template
             var htmlBody = GenerateVerificationEmailHtml(name, verificationCode, contactEmail);
-            
-            // Generate plaintext version
             var plainTextBody = GenerateVerificationEmailPlainText(name, verificationCode, contactEmail);
 
-            // Send email with both HTML and plaintext versions
             try
             {
                 var emailSettingsSection = _configuration.GetSection("EmailSettings");
@@ -229,24 +198,21 @@ namespace LostAndFound.Application.Services
                 var smtpUsername = emailSettingsSection["From"] ?? emailSettingsSection["SmtpUsername"];
                 var smtpPassword = emailSettingsSection["Password"] ?? emailSettingsSection["SmtpPassword"];
                 var fromEmail = emailSettingsSection["From"] ?? emailSettingsSection["FromEmail"];
-                var fromName = "Lost & Found App"; // Consistent sender name
+                var fromName = "Lost & Found App";
 
-                // Validate required settings
                 if (string.IsNullOrWhiteSpace(smtpServer) || string.IsNullOrWhiteSpace(smtpUsername) || 
                     string.IsNullOrWhiteSpace(smtpPassword) || string.IsNullOrWhiteSpace(fromEmail))
                 {
-                    Console.WriteLine("[ERROR] Email configuration is incomplete.");
+                    _logger.LogError("Email configuration is incomplete for verification email.");
                     return false;
                 }
 
-                // Create MIME message
                 var message = new MimeMessage();
                 message.From.Add(new MailboxAddress(Encoding.UTF8, fromName, fromEmail));
                 message.To.Add(new MailboxAddress(Encoding.UTF8, "", to));
                 message.ReplyTo.Add(new MailboxAddress(Encoding.UTF8, fromName, fromEmail));
                 message.Subject = subject;
 
-                // Add required headers for deliverability
                 message.Headers.Add("X-Mailer", "LostAndFoundMailer");
                 message.Headers.Add("X-Entity-Ref-ID", Guid.NewGuid().ToString());
                 message.Headers.Add("MIME-Version", "1.0");
@@ -255,7 +221,6 @@ namespace LostAndFound.Application.Services
                 message.Headers.Add("List-Unsubscribe", unsubscribeEmail);
                 message.Headers.Add("List-Unsubscribe-Post", "List-Unsubscribe=One-Click");
 
-                // Create multipart/alternative body
                 var bodyBuilder = new BodyBuilder
                 {
                     HtmlBody = htmlBody,
@@ -264,34 +229,22 @@ namespace LostAndFound.Application.Services
                 
                 message.Body = bodyBuilder.ToMessageBody();
 
-                Console.WriteLine($"[EMAIL] Sending verification email to: {to}");
+                _logger.LogInformation("Sending verification email to {Recipient}", to);
 
-                // Send with retry logic
                 return await SendEmailWithRetryAsync(message, smtpServer, smtpPort, smtpUsername, smtpPassword, to);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ERROR] Verification email sending failed: {ex.Message}");
-                Console.WriteLine($"[ERROR] Exception Type: {ex.GetType().Name}");
-                Console.WriteLine($"[ERROR] Stack Trace: {ex.StackTrace}");
-                
-                if (ex.InnerException != null)
-                {
-                    Console.WriteLine($"[ERROR] Inner Exception: {ex.InnerException.Message}");
-                }
-                
+                _logger.LogError(ex, "Verification email sending failed for {Recipient}", to);
                 return false;
             }
         }
 
         /// <summary>
         /// Generates the HTML template for verification email.
-        /// Uses simple, clean styling to avoid Gmail phishing warnings.
-        /// No external images, no URLs, minimal styling.
         /// </summary>
         private string GenerateVerificationEmailHtml(string name, string verificationCode, string contactEmail)
         {
-            // Escape HTML to prevent XSS
             var safeName = System.Net.WebUtility.HtmlEncode(name);
             var safeCode = System.Net.WebUtility.HtmlEncode(verificationCode);
             var safeEmail = System.Net.WebUtility.HtmlEncode(contactEmail);
@@ -362,7 +315,6 @@ namespace LostAndFound.Application.Services
 
         /// <summary>
         /// Generates the plaintext version of the verification email.
-        /// Required for multipart/alternative format and email clients that don't support HTML.
         /// </summary>
         private string GenerateVerificationEmailPlainText(string name, string verificationCode, string contactEmail)
         {
@@ -390,33 +342,19 @@ Contact: {contactEmail}
 
         /// <summary>
         /// Sends a password reset email with a reset token.
-        /// Uses a clean, simple design consistent with verification emails.
         /// </summary>
-        /// <param name="to">Recipient email address</param>
-        /// <param name="name">Recipient's full name</param>
-        /// <param name="resetToken">6-digit password reset token</param>
-        /// <returns>True if email sent successfully, false otherwise</returns>
         public async Task<bool> SendPasswordResetEmailAsync(string to, string name, string resetToken)
         {
             var subject = "Password Reset Request - Lost & Found";
-            
-            Console.WriteLine("[EMAIL] === PASSWORD RESET EMAIL ===");
-            Console.WriteLine($"[EMAIL] To: {to}");
-            Console.WriteLine($"[EMAIL] Name: {name}");
-            Console.WriteLine($"[EMAIL] Reset Token: {resetToken}");
-            Console.WriteLine("[EMAIL] ============================");
 
-            // Get sender email for footer
+            // C5 fix: removed Console.WriteLine that leaked reset tokens
+
             var emailSettings = _configuration.GetSection("EmailSettings");
             var contactEmail = emailSettings["From"] ?? emailSettings["FromEmail"] ?? "lost.found2026@gmail.com";
 
-            // Generate HTML email template
             var htmlBody = GeneratePasswordResetEmailHtml(name, resetToken, contactEmail);
-            
-            // Generate plaintext version
             var plainTextBody = GeneratePasswordResetEmailPlainText(name, resetToken, contactEmail);
 
-            // Send email with both HTML and plaintext versions
             try
             {
                 var emailSettingsSection = _configuration.GetSection("EmailSettings");
@@ -430,7 +368,7 @@ Contact: {contactEmail}
                 if (string.IsNullOrWhiteSpace(smtpServer) || string.IsNullOrWhiteSpace(smtpUsername) || 
                     string.IsNullOrWhiteSpace(smtpPassword) || string.IsNullOrWhiteSpace(fromEmail))
                 {
-                    Console.WriteLine("[ERROR] Email configuration is incomplete.");
+                    _logger.LogError("Email configuration is incomplete for password reset email.");
                     return false;
                 }
 
@@ -456,21 +394,13 @@ Contact: {contactEmail}
                 
                 message.Body = bodyBuilder.ToMessageBody();
 
-                Console.WriteLine($"[EMAIL] Sending password reset email to: {to}");
+                _logger.LogInformation("Sending password reset email to {Recipient}", to);
 
                 return await SendEmailWithRetryAsync(message, smtpServer, smtpPort, smtpUsername, smtpPassword, to);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ERROR] Password reset email sending failed: {ex.Message}");
-                Console.WriteLine($"[ERROR] Exception Type: {ex.GetType().Name}");
-                Console.WriteLine($"[ERROR] Stack Trace: {ex.StackTrace}");
-                
-                if (ex.InnerException != null)
-                {
-                    Console.WriteLine($"[ERROR] Inner Exception: {ex.InnerException.Message}");
-                }
-                
+                _logger.LogError(ex, "Password reset email sending failed for {Recipient}", to);
                 return false;
             }
         }
@@ -588,7 +518,7 @@ Contact: {contactEmail}
     <p>You requested to change your email to <strong>{System.Net.WebUtility.HtmlEncode(newEmail)}</strong>.</p>
     <p>Your verification code is: <strong style=""font-size: 24px; letter-spacing: 3px;"">{System.Net.WebUtility.HtmlEncode(verificationCode)}</strong></p>
     <p>This code expires in 24 hours.</p>
-    <p style=""color: #666; font-size: 12px;""Contact: {System.Net.WebUtility.HtmlEncode(contactEmail)}</p>
+    <p style=""color: #666; font-size: 12px;"">Contact: {System.Net.WebUtility.HtmlEncode(contactEmail)}</p>
 </body>
 </html>";
 

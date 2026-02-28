@@ -103,10 +103,25 @@ namespace LostAndFound.Application.Services
                 throw new ArgumentException("You cannot start a chat session with yourself.");
             }
 
+            // Guard: current user must not be deleted or blocked
+            var currentUser = await _unitOfWork.Users.GetByIdAsync(currentUserId);
+            if (currentUser == null || currentUser.IsDeleted)
+            {
+                throw new UnauthorizedAccessException("Your account is not available.");
+            }
+            if (currentUser.IsBlocked)
+            {
+                throw new UnauthorizedAccessException("Your account has been blocked.");
+            }
+
             var otherUser = await _unitOfWork.Users.GetByIdAsync(otherUserId);
-            if (otherUser == null)
+            if (otherUser == null || otherUser.IsDeleted)
             {
                 throw new KeyNotFoundException("The user you are trying to reach does not exist.");
+            }
+            if (otherUser.IsBlocked)
+            {
+                throw new InvalidOperationException("This user is currently unavailable.");
             }
 
             var existingSession = await _unitOfWork.ChatSessions.FirstOrDefaultAsync(s =>
@@ -166,6 +181,17 @@ namespace LostAndFound.Application.Services
                 throw new ArgumentException("Message text cannot be empty.");
             }
 
+            // Guard: sender must not be deleted or blocked
+            var sender = await _unitOfWork.Users.GetByIdAsync(senderId);
+            if (sender == null || sender.IsDeleted)
+            {
+                throw new UnauthorizedAccessException("Your account is not available.");
+            }
+            if (sender.IsBlocked)
+            {
+                throw new UnauthorizedAccessException("Your account has been blocked.");
+            }
+
             var session = await GetSessionAndValidateAsync(sessionId, senderId, trackChanges: true, includeUsers: false);
 
             var receiverId = session.User1Id == senderId ? session.User2Id : session.User1Id;
@@ -173,6 +199,17 @@ namespace LostAndFound.Application.Services
             if (receiverId == 0)
             {
                 throw new InvalidOperationException("Cannot determine the receiver for this session.");
+            }
+
+            // Guard: receiver must not be deleted or blocked
+            var receiver = await _unitOfWork.Users.GetByIdAsync(receiverId);
+            if (receiver == null || receiver.IsDeleted)
+            {
+                throw new InvalidOperationException("The recipient is no longer available.");
+            }
+            if (receiver.IsBlocked)
+            {
+                throw new InvalidOperationException("The recipient is currently unavailable.");
             }
 
             var message = new ChatMessage
