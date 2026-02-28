@@ -39,7 +39,7 @@ namespace LostAndFound.Application.Features.Users.Queries.GetUserById
 
                 if (user == null)
                 {
-                    return BaseResponse<SafeUserDto>.FailureResult("User not found");
+                    return BaseResponse<SafeUserDto>.FailureResult("Invalid request.");
                 }
 
                 // All authenticated users can view profiles (social media requirement)
@@ -47,9 +47,9 @@ namespace LostAndFound.Application.Features.Users.Queries.GetUserById
 
                 return BaseResponse<SafeUserDto>.SuccessResult(user, "User retrieved successfully");
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                return BaseResponse<SafeUserDto>.FailureResult($"Error retrieving user: {ex.Message}");
+                return BaseResponse<SafeUserDto>.FailureResult("An unexpected error occurred.");
             }
         }
     }

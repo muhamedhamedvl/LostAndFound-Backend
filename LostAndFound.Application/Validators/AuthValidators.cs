@@ -1,5 +1,6 @@
 using FluentValidation;
 using LostAndFound.Application.DTOs.Auth;
+using LostAndFound.Domain.Enums;
 
 namespace LostAndFound.Application.Validators
 {
@@ -20,6 +21,8 @@ namespace LostAndFound.Application.Validators
 
     public class SignupDtoValidator : AbstractValidator<SignupDto>
     {
+        private static readonly string[] ValidGenders = Enum.GetNames<Gender>();
+
         public SignupDtoValidator()
         {
             RuleFor(x => x.FirstName)
@@ -42,6 +45,10 @@ namespace LostAndFound.Application.Validators
                 .NotEmpty().WithMessage("Password is required")
                 .MinimumLength(6).WithMessage("Password must be at least 6 characters long")
                 .MaximumLength(100).WithMessage("Password cannot exceed 100 characters");
+
+            RuleFor(x => x.Gender)
+                .Must(g => g == null || ValidGenders.Contains(g, StringComparer.OrdinalIgnoreCase))
+                .WithMessage($"Invalid gender. Allowed values: {string.Join(", ", Enum.GetNames<Gender>())}");
         }
     }
 

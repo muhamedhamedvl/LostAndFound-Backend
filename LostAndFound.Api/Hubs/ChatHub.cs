@@ -16,17 +16,20 @@ namespace LostAndFound.Api.Hubs
         private readonly IChatService _chatService;
         private readonly IUserConnectionManager _connectionManager;
         private readonly IChatHubService _chatHubService;
+        private readonly INotificationService _notificationService;
         private readonly ILogger<ChatHub> _logger;
 
         public ChatHub(
             IChatService chatService,
             IUserConnectionManager connectionManager,
             IChatHubService chatHubService,
+            INotificationService notificationService,
             ILogger<ChatHub> logger)
         {
             _chatService = chatService;
             _connectionManager = connectionManager;
             _chatHubService = chatHubService;
+            _notificationService = notificationService;
             _logger = logger;
         }
 
@@ -66,6 +69,25 @@ namespace LostAndFound.Api.Hubs
             await RegisterCurrentConnectionAsync();
         }
 
+        /// <summary>
+        /// Join a session group so the client receives messages sent to ChatSession_{id}.
+        /// </summary>
+        public async Task JoinSession(int sessionId)
+        {
+            var userId = GetCurrentUserId();
+            // Validate the caller is a participant
+            await _chatService.GetSessionDetailsAsync(sessionId, userId);
+            await Groups.AddToGroupAsync(Context.ConnectionId, SessionGroup(sessionId));
+        }
+
+        /// <summary>
+        /// Leave a session group.
+        /// </summary>
+        public async Task LeaveSession(int sessionId)
+        {
+            await Groups.RemoveFromGroupAsync(Context.ConnectionId, SessionGroup(sessionId));
+        }
+
         public async Task SendMessage(int sessionId, string content)
         {
             var userId = GetCurrentUserId();
@@ -73,6 +95,23 @@ namespace LostAndFound.Api.Hubs
             {
                 var sentMessage = await _chatService.SendMessageAsync(sessionId, userId, content);
                 await _chatHubService.NotifyMessageSentAsync(sentMessage);
+
+                // Push + in-app notification (same as REST controller)
+                if (sentMessage.ReceiverId != userId && sentMessage.Sender != null)
+                {
+                    try
+                    {
+                        await _notificationService.NotifyNewMessageAsync(
+                            sentMessage.ReceiverId,
+                            userId,
+                            sentMessage.Sender.FullName,
+                            sessionId);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Push notification failed for session {SessionId}", sessionId);
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -136,8 +175,8 @@ namespace LostAndFound.Api.Hubs
 
         private int GetCurrentUserId()
         {
-            var userId = Context.User?.FindFirst("nameid")?.Value
-                         ?? Context.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var userId = Context.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                         ?? Context.User?.FindFirst("nameid")?.Value;
 
             if (!int.TryParse(userId, out var parsed) || parsed <= 0)
             {
@@ -149,8 +188,8 @@ namespace LostAndFound.Api.Hubs
 
         private int? GetCurrentUserIdOrDefault()
         {
-            var userId = Context.User?.FindFirst("nameid")?.Value
-                         ?? Context.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var userId = Context.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                         ?? Context.User?.FindFirst("nameid")?.Value;
 
             if (int.TryParse(userId, out var parsed) && parsed > 0)
             {
@@ -161,6 +200,7 @@ namespace LostAndFound.Api.Hubs
         }
 
         private static string UserGroup(int userId) => $"User_{userId}";
+        private static string SessionGroup(int sessionId) => $"ChatSession_{sessionId}";
     }
 }
 

@@ -37,6 +37,9 @@ namespace LostAndFound.Infrastructure.Persistence
         // Push notifications
         public DbSet<DeviceToken> DeviceTokens { get; set; }
 
+        // Refresh tokens (multi-device)
+        public DbSet<RefreshToken> RefreshTokens { get; set; }
+
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
@@ -55,6 +58,7 @@ namespace LostAndFound.Infrastructure.Persistence
             modelBuilder.ApplyConfiguration(new ChatSessionConfig());
             modelBuilder.ApplyConfiguration(new ChatMessageConfig());
             modelBuilder.ApplyConfiguration(new DeviceTokenConfig());
+            modelBuilder.ApplyConfiguration(new RefreshTokenConfig());
 
             // Notification relationships
             modelBuilder.Entity<Notification>()

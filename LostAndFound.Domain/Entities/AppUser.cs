@@ -42,6 +42,7 @@ namespace LostAndFound.Domain.Entities
         public ICollection<UserRole> UserRoles { get; set; } = new List<UserRole>();
         public ICollection<Report> Reports { get; set; } = new List<Report>();
         public ICollection<ChatSession> ChatSessions { get; set; } = new List<ChatSession>();
+        public ICollection<RefreshToken> RefreshTokens { get; set; } = new List<RefreshToken>();
     }
 }
 

@@ -16,13 +16,16 @@ namespace LostAndFound.Application.Mapping
         public MappingProfile()
         {
             // ── User mappings ──
-            CreateMap<User, UserDto>()
+            // AppUser is the Identity base; User is a legacy alias.
+            // EF materialises AppUser instances, so map AppUser -> UserDto directly.
+            CreateMap<AppUser, UserDto>()
                 .ForMember(dest => dest.Roles, opt => opt.MapFrom(src => src.UserRoles != null && src.UserRoles.Any()
                     ? src.UserRoles.Select(ur => ur.Role != null ? ur.Role.Name : string.Empty).Where(r => !string.IsNullOrEmpty(r)).ToList()
                     : new List<string>()))
                 .ForMember(dest => dest.ProfilePictureUrl, opt => opt.MapFrom(src => src.ProfilePictureUrl))
                 .ForMember(dest => dest.DateOfBirth, opt => opt.MapFrom(src => src.DateOfBirth))
-                .ForMember(dest => dest.Gender, opt => opt.MapFrom(src => src.Gender));
+                .ForMember(dest => dest.Gender, opt => opt.MapFrom(src => src.Gender))
+                .IncludeAllDerived();  // covers User : AppUser automatically
             CreateMap<SignupDto, User>()
                 .ForMember(dest => dest.FullName, opt => opt.MapFrom(src => $"{src.FirstName.Trim()} {src.LastName.Trim()}".Trim()))
                 .ForMember(dest => dest.PasswordHash, opt => opt.Ignore())
