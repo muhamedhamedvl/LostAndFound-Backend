@@ -8,10 +8,12 @@ using LostAndFound.Application.Features.Users.Commands.CreateAdmin;
 using LostAndFound.Application.Features.Users.Queries.GetAllUsers;
 using LostAndFound.Application.Features.Users.Queries.GetUserById;
 using LostAndFound.Application.Interfaces;
+using LostAndFound.Domain.Enums;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 using Swashbuckle.AspNetCore.Annotations;
 namespace LostAndFound.Api.Controllers
@@ -127,7 +129,7 @@ namespace LostAndFound.Api.Controllers
         [HttpGet("me")]
         [SwaggerOperation(
             Summary = "Get my data",
-            Description = "Returns the authenticated user's profile information including name, email, phone, and verification status. Requires authentication."
+            Description = "Returns the authenticated user's profile information including name, email, phone, verification status, and roles. Requires authentication."
         )]
         [ProducesResponseType(typeof(BaseResponse<SafeUserDto>), 200)]
         [ProducesResponseType(401)]
@@ -139,10 +141,15 @@ namespace LostAndFound.Api.Controllers
                 return Unauthorized(BaseResponse<SafeUserDto>.FailureResult("Invalid user token"));
             }
 
-            var user = await _unitOfWork.Users.GetByIdAsync(userId);
+            var user = await _unitOfWork.Users.GetQueryable()
+                .Where(u => u.Id == userId && !u.IsDeleted && !u.IsBlocked)
+                .Include(u => u.UserRoles)
+                    .ThenInclude(ur => ur.Role)
+                .FirstOrDefaultAsync();
+
             if (user == null)
             {
-                return NotFound(BaseResponse<SafeUserDto>.FailureResult("User not found"));
+                return Unauthorized(BaseResponse<SafeUserDto>.FailureResult("Authentication failed"));
             }
 
             var safeUser = new SafeUserDto
@@ -152,6 +159,8 @@ namespace LostAndFound.Api.Controllers
                 Email = user.Email,
                 Phone = user.Phone,
                 IsVerified = user.IsVerified,
+                Roles = user.UserRoles?.Select(ur => ur.Role?.Name ?? string.Empty)
+                    .Where(r => !string.IsNullOrEmpty(r)).ToList() ?? new List<string>(),
                 DateOfBirth = user.DateOfBirth,
                 Gender = user.Gender,
                 ProfilePictureUrl = user.ProfilePictureUrl,
@@ -185,43 +194,8 @@ namespace LostAndFound.Api.Controllers
             return BadRequest(result);
         }
 
-        [HttpPut("{id}/verify")]
-        [Authorize(Roles = "Admin")]
-        [SwaggerOperation(
-            Summary = "Verify a user account",
-            Description = "Allows an Admin to manually verify a user's account. Sets the user's verification status to true. Requires Admin role."
-        )]
-        [ProducesResponseType(typeof(BaseResponse<object>), 200)]
-        [ProducesResponseType(401)]
-        [ProducesResponseType(403)]
-        [ProducesResponseType(404)]
-        public async Task<IActionResult> VerifyUser(int id)
-        {
-            try
-            {
-                var user = await _unitOfWork.Users.GetByIdAsync(id);
-                if (user == null)
-                {
-                    return NotFound(BaseResponse<object>.FailureResult("User not found"));
-                }
-
-                if (user.IsVerified)
-                {
-                    return Ok(BaseResponse<object>.SuccessResult(new { user.Id, user.Email, user.IsVerified }, "User is already verified"));
-                }
-
-                user.IsVerified = true;
-                user.UpdatedAt = DateTime.UtcNow;
-                await _unitOfWork.Users.UpdateAsync(user);
-                await _unitOfWork.SaveChangesAsync();
-
-                return Ok(BaseResponse<object>.SuccessResult(new { user.Id, user.Email, user.IsVerified }, "User verified successfully"));
-            }
-            catch (Exception)
-            {
-                return StatusCode(500, BaseResponse<object>.FailureResult("An error occurred while verifying the user"));
-            }
-        }
+        // Verify-user endpoint removed — use AdminController PUT /api/admin/users/{id}/verify instead.
+        // This avoids duplicate endpoints with divergent behavior.
 
         [HttpPut("me")]
         [Consumes("multipart/form-data")]
@@ -247,7 +221,7 @@ namespace LostAndFound.Api.Controllers
                 var user = await _unitOfWork.Users.GetByIdAsync(userId);
                 if (user == null)
                 {
-                    return NotFound(BaseResponse<SafeUserDto>.FailureResult("User not found"));
+                    return NotFound(BaseResponse<SafeUserDto>.FailureResult("Invalid request."));
                 }
 
                 // Update user properties if provided
@@ -268,15 +242,15 @@ namespace LostAndFound.Api.Controllers
 
                 if (!string.IsNullOrWhiteSpace(updateProfileDto.Gender))
                 {
-                    // Validate gender value
-                    var validGenders = new[] { "Male", "Female", "Anonymous" };
-                    if (validGenders.Contains(updateProfileDto.Gender))
+                    // Validate gender value against the Gender enum
+                    if (Enum.TryParse<Gender>(updateProfileDto.Gender, ignoreCase: true, out _))
                     {
                         user.Gender = updateProfileDto.Gender;
                     }
                     else
                     {
-                        return BadRequest(BaseResponse<SafeUserDto>.FailureResult("Invalid gender. Allowed values: Male, Female, Anonymous"));
+                        return BadRequest(BaseResponse<SafeUserDto>.FailureResult(
+                            $"Invalid gender. Allowed values: {string.Join(", ", Enum.GetNames<Gender>())}"));
                     }
                 }
 
@@ -354,7 +328,7 @@ namespace LostAndFound.Api.Controllers
                 var user = await _unitOfWork.Users.GetByIdAsync(userId);
                 if (user == null)
                 {
-                    return NotFound(BaseResponse<object>.FailureResult("User not found"));
+                    return NotFound(BaseResponse<object>.FailureResult("Invalid request."));
                 }
 
                 // Delete old profile picture from disk
@@ -390,6 +364,19 @@ namespace LostAndFound.Api.Controllers
         {
             try
             {
+                // Ownership check: only the user themselves or Admin can view reports
+                var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
+                if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out int currentUserId))
+                {
+                    return Unauthorized(BaseResponse<object>.FailureResult("Invalid user token"));
+                }
+
+                var isAdmin = User.IsInRole("Admin");
+                if (id != currentUserId && !isAdmin)
+                {
+                    return StatusCode(403, BaseResponse<object>.FailureResult("You can only view your own reports."));
+                }
+
                 if (page < 1)
                 {
                     return BadRequest(BaseResponse<object>.FailureResult("Page number must be greater than 0"));
@@ -402,7 +389,7 @@ namespace LostAndFound.Api.Controllers
                 var user = await _unitOfWork.Users.GetByIdAsync(id);
                 if (user == null)
                 {
-                    return NotFound(BaseResponse<object>.FailureResult("User not found"));
+                    return NotFound(BaseResponse<object>.FailureResult("Invalid request."));
                 }
 
                 var (reports, totalCount) = await _reportService.GetReportsByUserIdAsync(id, page, pageSize);
