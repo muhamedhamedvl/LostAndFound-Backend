@@ -18,6 +18,7 @@ namespace LostAndFound.Application.Interfaces
         IRepository<ChatMessage> ChatMessages { get; }
         IRepository<Notification> Notifications { get; }
         IRepository<DeviceToken> DeviceTokens { get; }
+        IRepository<RefreshToken> RefreshTokens { get; }
 
         Task<int> SaveChangesAsync();
         Task BeginTransactionAsync();

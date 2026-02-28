@@ -5,7 +5,7 @@ namespace LostAndFound.Application.Interfaces
 {
     public interface IAuthService
     {
-        Task<BaseResponse<AuthResponseDto>> SignupAsync(SignupDto signupDto);
+        Task<BaseResponse> SignupAsync(SignupDto signupDto);
         Task<BaseResponse<AuthResponseDto>> LoginAsync(LoginDto loginDto);
         Task<BaseResponse<AuthResponseDto>> GoogleSignInAsync(GoogleSignInDto dto);
         Task<BaseResponse> VerifyAccountAsync(VerifyAccountDto verifyAccountDto);

@@ -9,6 +9,7 @@ using LostAndFound.Infrastructure.Persistence.Repositories;
 using MediatR;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using System.Reflection;
@@ -28,7 +29,12 @@ namespace LostAndFound.Infrastructure
                             maxRetryCount: 5,
                             maxRetryDelay: TimeSpan.FromSeconds(30),
                             errorNumbersToAdd: null);
-                    }));
+                    })
+                // Suppress EF warning about global query filter on AppUser (soft delete)
+                // affecting required relationships. This is intentional — deleted users'
+                // related data (messages, reports, etc.) remains in the DB but the User
+                // navigation may resolve to null, which the application code already handles.
+                .ConfigureWarnings(w => w.Ignore(CoreEventId.PossibleIncorrectRequiredNavigationWithQueryFilterInteractionWarning)));
 
             // ASP.NET Core Identity configuration (AppUser only; roles are handled via existing Role/UserRole model and JWT claims)
             services.AddIdentityCore<AppUser>(options =>
