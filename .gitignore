@@ -371,3 +371,13 @@ FodyWeavers.xsd
 /changes.txt
 /LostAndFound.Api/wwwroot/uploads/posts/1/f9fd375a-c459-4927-a8fb-23b517ed1b4b.jpeg
 /LostAndFound.Api/wwwroot/uploads/posts/2/e6fcc4e6-bb1e-4a39-b481-8f60749f4ac5.jpeg
+
+# Publish output folders
+test-publish/
+out/
+
+# Database migration scripts (generated)
+migration_*.sql
+
+# Misc
+nul
