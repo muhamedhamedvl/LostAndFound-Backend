@@ -1,122 +1,90 @@
-## Lost & Found – Backend (.NET 9, Clean Architecture)
+# Wasit Kheir - Lost & Found Platform
 
-Backend API for a **Lost & Found / Wasit Kheir** platform.  
-It provides authentication, lost/found reports with images, a home feed, chat, notifications, matching, and admin moderation, designed to be consumed by a Flutter mobile app or any HTTP client.
-
-The full HTTP contract (all endpoints and example payloads) is documented in **`API_DOCUMENTATION_FULL.md`** and should be treated as the source of truth for the frontend team.
+> A production-ready RESTful API for managing lost and found reports, built with .NET 9 and Clean Architecture.
 
 ---
 
-## 1. Project Overview
+## Table of Contents
 
-### What this project does
-
-- Manages **user accounts** (signup, email verification, login, Google Sign‑In, password reset, delete account).
-- Allows users to create **lost or found reports** with:
-  - Images
-  - Location (lat/lng)
-  - Categories/subcategories
-  - Moderation lifecycle (Pending → Approved / Rejected / Matched / Closed …).
-- Provides a **home dashboard** with:
-  - Recent reports feed
-  - Total report count
-  - Categories count
-  - “My reports” count (for logged‑in users).
-- Supports **user profiles**:
-  - View other users’ profiles and their reports
-  - Edit own profile and upload a profile picture.
-- Implements **1‑to‑1 chat** between users with real‑time updates via SignalR.
-- Sends **notifications**:
-  - In‑app listing + unread count
-  - Push notifications (Firebase FCM when configured)
-  - For matches, new messages, interested users, status updates, location alerts.
-- Provides **matching** between reports based on:
-  - Subcategory
-  - Location proximity
-  - Keyword overlap
-  - Automatic matching when reports are created, plus manual re‑run endpoint.
-- Includes **admin tools**:
-  - Approve / reject / flag / archive reports
-  - Delete any report
-  - View all reports (any lifecycle)
-  - Verify users.
-
-For a visual user flow (sign‑up → create report → home → update/delete → chat → notifications → admin moderation), the current backend fully supports the diagram used in the project.
+- [Overview](#overview)
+- [Architecture](#architecture)
+- [Tech Stack](#tech-stack)
+- [Getting Started](#getting-started)
+- [Configuration](#configuration)
+- [Database Setup](#database-setup)
+- [Running the Application](#running-the-application)
+- [Deployment](#deployment)
+- [API Reference](#api-reference)
+- [Authentication](#authentication)
+- [Real-Time Communication](#real-time-communication)
+- [Roles & Permissions](#roles--permissions)
+- [Health Checks](#health-checks)
+- [Known Limitations](#known-limitations)
+- [Contributing](#contributing)
 
 ---
 
-## 2. Tech Stack
+## Overview
 
-### Core
+**Wasit Kheir** is a backend API that powers a lost-and-found platform where users can report lost or found items and people, communicate via real-time chat, receive intelligent match suggestions, and get notified about relevant activity. It is designed to be consumed by a Flutter mobile application or any HTTP client.
 
-- **Language / Runtime:** C#, **.NET 9.0**
-- **Web framework:** ASP.NET Core Web API
-- **Architecture:**
-  - `LostAndFound.Domain` – entities, enums, core domain logic
-  - `LostAndFound.Application` – DTOs, services, interfaces, validation, MediatR handlers
-  - `LostAndFound.Infrastructure` – EF Core, repositories, persistence config, Identity
-  - `LostAndFound.Api` – HTTP endpoints, middleware, SignalR hubs, DI configuration
+### Key Features
 
-### Storage
-
-- **Database:** SQL Server
-- **ORM:** Entity Framework Core 9 with code‑first migrations
-- **Static files / images:**
-  - Stored locally under `LostAndFound.Api/wwwroot`
-  - Profile pictures: `/uploads/profiles/{userId}/...`
-  - Report images: `/uploads/reports/{reportId}/...`
-
-### Authentication & Authorization
-
-- JWT Bearer **access tokens**
-- **Refresh tokens**
-- Email/password authentication
-- **Email verification** (verification codes)
-- Password reset / change password
-- **Google Sign‑In** (`POST /api/auth/google`) using configured Google Client Id
-- ASP.NET Core Identity with custom `AppUser` (int keys)
-- Roles:
-  - `User`
-  - `Admin` (role‑based authorization with `[Authorize(Roles = "Admin")]`)
-
-### Real‑Time & Notifications
-
-- **SignalR hubs:**
-  - `/chatHub` – chat sessions & messages
-  - `/notificationHub` – realtime in‑app notifications
-  - JWT is passed as `access_token` query parameter.
-- **Push notifications (optional but supported):**
-  - Firebase Admin SDK (`FirebaseAdmin` package)
-  - Uses `Firebase` configuration (ProjectId, ClientEmail, PrivateKey, VapidKey)
-  - If Firebase is missing or fails, a **stub push service** is used (no‑op) so the API still runs.
-
-### Observability & Hardening
-
-- **Serilog** logging (console + rolling log files)
-- Custom middleware for:
-  - Error handling
-  - Request logging
-- Rate limiting (`Microsoft.AspNetCore.RateLimiting`):
-  - Separate policies for auth, upload, and general API
-- Health checks:
-  - `/health`
-  - `/health/ready`
-  - `/health/live`
+- **User Management** -- Registration, email verification, login, Google Sign-In, password reset, account deletion
+- **Report System** -- Create, update, and search lost/found reports with images, geolocation, and categories
+- **Moderation Workflow** -- Admin-controlled lifecycle (Pending, Approved, Rejected, Matched, Closed, Archived, Flagged)
+- **Smart Matching** -- Automatic and manual matching based on subcategory, proximity, and keyword similarity
+- **Real-Time Chat** -- 1-to-1 messaging via SignalR with read receipts
+- **Notifications** -- In-app + push notifications (Firebase FCM) for matches, messages, status changes, and location alerts
+- **Admin Panel Support** -- Report moderation, user verification, and content management endpoints
 
 ---
 
-## 3. Getting Started (Local Setup)
+## Architecture
 
-### 3.1 Prerequisites
+The solution follows **Clean Architecture** principles with strict dependency inversion:
 
-- **.NET 9 SDK**
-- **SQL Server** (Developer / Express / localdb)
-- **PowerShell** (for the helper script on Windows)
-- Optional:
-  - Firebase project (for push notifications)
-  - SMTP account (Gmail or another provider) for sending emails
+```
+LostAndFound.sln
+|
+|-- LostAndFound.Domain          Entities, enums, core domain models
+|-- LostAndFound.Application     DTOs, services, interfaces, validators, MediatR handlers
+|-- LostAndFound.Infrastructure  EF Core, repositories, Identity, persistence config
+|-- LostAndFound.Api             Controllers, middleware, SignalR hubs, DI setup
+```
 
-### 3.2 Clone & Restore
+**Dependency flow:** `Api -> Application <- Infrastructure -> Domain`
+
+---
+
+## Tech Stack
+
+| Layer              | Technology                                                    |
+|--------------------|---------------------------------------------------------------|
+| Runtime            | .NET 9.0, C#                                                 |
+| Web Framework      | ASP.NET Core Web API                                         |
+| Database           | SQL Server + Entity Framework Core 9 (Code-First)            |
+| Authentication     | ASP.NET Core Identity, JWT Bearer, Refresh Tokens, Google OAuth |
+| Real-Time          | SignalR (WebSockets / Long Polling)                          |
+| Push Notifications | Firebase Admin SDK (FCM) with graceful fallback              |
+| Validation         | FluentValidation + MediatR pipeline behavior                 |
+| Mapping            | AutoMapper                                                   |
+| Logging            | Serilog (Console + Rolling File sinks)                       |
+| API Documentation  | Swagger / OpenAPI (Swashbuckle) with XML comments            |
+| Rate Limiting      | ASP.NET Core Rate Limiting (per-policy: auth, upload, api)   |
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+- [.NET 9 SDK](https://dotnet.microsoft.com/download/dotnet/9.0)
+- SQL Server (Developer, Express, or LocalDB)
+- (Optional) Firebase project for push notifications
+- (Optional) Gmail SMTP credentials for email services
+
+### Clone & Restore
 
 ```bash
 git clone <repo-url>
@@ -124,14 +92,16 @@ cd LostAndFound
 dotnet restore
 ```
 
-### 3.3 Configure `appsettings.json` (Local Dev)
+---
 
-File: `LostAndFound.Api/appsettings.json` (simplified):
+## Configuration
+
+All settings are managed through `LostAndFound.Api/appsettings.json`. For local development, use [User Secrets](https://learn.microsoft.com/en-us/aspnet/core/security/app-secrets) for sensitive values.
 
 ```json
 {
   "ConnectionStrings": {
-    "DefaultConnection": "Server=.;Database=LostAndFoundDbfinal;Trusted_Connection=True;TrustServerCertificate=True;"
+    "DefaultConnection": "Server=.;Database=LostAndFoundDb;Trusted_Connection=True;TrustServerCertificate=True;"
   },
   "JwtSettings": {
     "SecretKey": "",
@@ -139,44 +109,22 @@ File: `LostAndFound.Api/appsettings.json` (simplified):
     "Audience": "LostAndFound.Client",
     "ExpiryMinutes": 60
   },
-  "Google": {
-    "ClientId": ""
-  },
-  "Firebase": {
-    "ProjectId": "",
-    "ClientEmail": "",
-    "PrivateKey": "",
-    "VapidKey": ""
-  },
-  "EmailSettings": {
-    "From": "",
-    "Password": "",
-    "Host": "smtp.gmail.com",
-    "Port": 587,
-    "EnableSSL": true
-  },
-  "Cors": {
-    "AllowedOrigins": []
-  }
+  "Google": { "ClientId": "" },
+  "Firebase": { "ProjectId": "", "ClientEmail": "", "PrivateKey": "", "VapidKey": "" },
+  "EmailSettings": { "From": "", "Password": "", "Host": "smtp.gmail.com", "Port": 587, "EnableSSL": true },
+  "Cors": { "AllowedOrigins": [] }
 }
 ```
 
-For **local development** you can:
+> **Note:** In production, set `JwtSettings:SecretKey` to at least 32 characters. The application will fail to start if the key is missing or too short.
 
-- Put non‑sensitive values directly here (e.g. local DB, issuer/audience), and  
-- Use **User Secrets** (`dotnet user-secrets`) for secrets like:
-  - `JwtSettings:SecretKey`
-  - `EmailSettings:*`
-  - `Firebase:*`
-  - `Google:ClientId`
+For Firebase push notification setup, see [`docs/FIREBASE_PUSH_SETUP.md`](docs/FIREBASE_PUSH_SETUP.md). If Firebase is not configured, the API falls back to a no-op stub -- all other functionality remains unaffected.
 
-Firebase push notification setup is described in `docs/FIREBASE_PUSH_SETUP.md`.
+---
 
-### 3.4 Database & Migrations
+## Database Setup
 
-#### Option A – Standard EF Core migrations
-
-From the solution root:
+### Option A -- EF Core Migrations (Recommended)
 
 ```bash
 dotnet ef database update \
@@ -184,476 +132,227 @@ dotnet ef database update \
   --startup-project LostAndFound.Api
 ```
 
-This applies all migrations to the database defined in `ConnectionStrings:DefaultConnection`.
+### Option B -- Database Migrator Tool
 
-#### Option B – DatabaseMigrator (copy + migrate)
-
-The project `LostAndFound.DatabaseMigrator` can:
-
-1. Apply migrations to the target DB (from `LostAndFound.Api/appsettings.json`).
-2. Copy data from a **source DB** (User Secrets + appsettings) into the target DB.
-
-From the solution root:
+A dedicated `LostAndFound.DatabaseMigrator` project can apply migrations and copy data from a source database:
 
 ```powershell
 .\Run-DatabaseMigrator.ps1
 ```
 
-This script:
+---
 
-- Ensures it’s run from the proper folder
-- Runs `dotnet run` on `LostAndFound.DatabaseMigrator`
-- Migrates and copies data in FK‑safe order (roles, users, categories, reports, images, matches, chats, notifications, device tokens).
-
-### 3.5 Run the API Locally
+## Running the Application
 
 ```bash
 cd LostAndFound.Api
 dotnet run
 ```
 
-The API will:
+The API will start on the default Kestrel ports. In non-Production environments:
 
-- Serve HTTP/HTTPS (Kestrel default ports)
-- Expose Swagger UI at `/swagger` (non‑Production)
-- Serve static files under `/uploads/...`
-
----
-
-## 4. Production Setup
-
-> High‑level only; adapt to your hosting (IIS, Azure, Docker, etc.).
-
-### 4.1 Required Environment / Secrets
-
-Set these via environment variables or a secure production `appsettings.json`:
-
-- **Database**
-  - `ConnectionStrings__DefaultConnection`
-
-- **JWT**
-  - `JwtSettings__SecretKey`
-    - Must be **at least 32 characters** in Production.  
-      If missing/too short, the API will fail to start.
-  - `JwtSettings__Issuer`
-  - `JwtSettings__Audience`
-  - (Optional) `JwtSettings__ExpiryMinutes`
-
-- **Google Sign‑In**
-  - `Google__ClientId`
-
-- **Email (SMTP)**
-  - `EmailSettings__From`
-  - `EmailSettings__Password`
-  - `EmailSettings__Host`
-  - `EmailSettings__Port`
-  - `EmailSettings__EnableSSL`
-
-- **Firebase (Push Notifications)**
-  - `Firebase__ProjectId`
-  - `Firebase__ClientEmail`
-  - `Firebase__PrivateKey`
-  - `Firebase__VapidKey`
-
-If Firebase settings are missing or invalid:
-
-- The backend will log a warning and fall back to a **stub push service** (no push), but the rest of the API will continue to work.
-
-- **CORS**
-  - `Cors:AllowedOrigins` in `appsettings.json` as a JSON array, or
-  - `Cors__AllowedOrigins` env var (comma‑separated) for allowed origins, e.g.:
-
-    ```text
-    Cors__AllowedOrigins=https://app.example.com,https://admin.example.com
-    ```
-
-### 4.2 Deploying (Typical Steps)
-
-1. Publish:
-
-   ```bash
-   dotnet publish LostAndFound.Api -c Release -o ./out
-   ```
-
-2. Deploy the `out` folder to your server / container.
-3. Configure environment variables or production `appsettings.json`.
-4. Ensure SQL Server is reachable and apply migrations (EF or DatabaseMigrator).
-5. Configure HTTPS and reverse proxy (if used).
-6. Verify:
-   - `/health`, `/health/ready`, `/health/live` return healthy
-   - `/swagger` works in non‑Production
-   - Frontend origin is allowed via CORS.
+- **Swagger UI** is available at `/swagger`
+- **Static files** (uploaded images) are served from `/uploads/...`
 
 ---
 
-## 5. API Usage (For Frontend Team)
+## Deployment
 
-### 5.1 Base URL
+### Production Environment Variables
 
-- **BASE_URL** = root of the deployed API  
-  Example: `https://api.yourdomain.com`
+Set via environment variables, Azure Key Vault, or a production `appsettings.json`:
 
-All endpoints in `API_DOCUMENTATION_FULL.md` are relative to this.
+| Variable                            | Required | Notes                                          |
+|-------------------------------------|----------|-------------------------------------------------|
+| `ConnectionStrings__DefaultConnection` | Yes   | SQL Server connection string                   |
+| `JwtSettings__SecretKey`            | Yes      | Minimum 32 characters                          |
+| `JwtSettings__Issuer`               | Yes      | Token issuer identifier                        |
+| `JwtSettings__Audience`             | Yes      | Token audience identifier                      |
+| `Google__ClientId`                  | No       | Required for Google Sign-In                    |
+| `EmailSettings__From`               | No       | SMTP sender address                            |
+| `EmailSettings__Password`           | No       | SMTP password / app password                   |
+| `Firebase__ProjectId`               | No       | Required for push notifications                |
+| `Cors__AllowedOrigins`              | Yes      | Comma-separated list of allowed origins        |
 
-### 5.2 Auth Flow (User)
+### Publish & Deploy
 
-**Signup → Verify → Login → Refresh flow:**
+```bash
+dotnet publish LostAndFound.Api -c Release -o ./out
+```
 
-1. **Signup**
+Deploy the `out` directory to your hosting environment (IIS, Azure App Service, Docker, etc.), ensure SQL Server is reachable, and verify via the [health check endpoints](#health-checks).
 
-   - `POST /api/auth/signup`
-   - Body includes `firstName`, `lastName`, `email`, `phone`, `password`, `dateOfBirth`, `gender`.
-   - Returns:
-     - `user` object (with `isVerified = false` initially)
-     - `accessToken`, `refreshToken`, `expiresAt`.
+---
 
-2. **Verify email**
+## API Reference
 
-   - `GET /api/auth/verify-account?code=...&email=...`
-   - Marks user as verified; returns base response.
+Full endpoint documentation with request/response examples is maintained in:
 
-3. **Login**
+> **[`API_DOCUMENTATION_FULL.md`](API_DOCUMENTATION_FULL.md)**
 
-   - `POST /api/auth/login`
-   - Returns:
+### Response Envelope
 
-     ```json
-     {
-       "success": true,
-       "message": "Login successful",
-       "data": {
-         "user": {
-           "id": 1,
-           "fullName": "mohamed hamed",
-           "email": "mh1191128@gmail.com",
-           "phone": "01146784553",
-           "isVerified": true,
-           "roles": ["User"],
-           "dateOfBirth": "2004-04-06",
-           "gender": "Male",
-           "profilePictureUrl": null,
-           "createdAt": "...",
-           "updatedAt": null
-         },
-         "accessToken": "<JWT>",
-         "refreshToken": "<refresh>",
-         "expiresAt": "..."
-       },
-       "errors": []
-     }
-     ```
-
-4. **Refresh token**
-
-   - `POST /api/auth/refresh-token`
-   - Body: `{ "refreshToken": "..." }`
-   - Returns new access & refresh tokens.
-
-5. **Google Sign‑In (optional)**
-
-   - `POST /api/auth/google`
-   - Body: `{ "idToken": "<Google ID token from client>" }`
-   - Returns the same structure as login.
-
-### 5.3 Standard Response Shape
-
-All documented endpoints (except a few admin operations) use:
+All endpoints return a standardized `BaseResponse<T>` envelope:
 
 ```json
 {
   "success": true,
   "message": "Operation completed successfully",
-  "data": { ... },
+  "data": { },
   "errors": []
 }
 ```
 
-- `success`: `true` / `false`
-- `message`: human‑readable text
-- `data`: main payload or `null`
-- `errors`: array of error strings (validation, etc.)
+### Endpoint Groups
 
-### 5.4 File Upload Notes
-
-- **Content‑Type:** always `multipart/form-data` for file uploads.
-
-- **Profile picture**
-  - `PUT /api/users/me` with form fields including `profilePicture`
-  - Or `POST /api/users/me/profile-picture`
-  - Limit: 5MB
-
-- **Report images**
-  - `POST /api/reports`:
-    - Fields: `title`, `description`, `type`, `subCategoryId`, `locationName`, `latitude`, `longitude`, `dateReported`, `images[]`
-  - `PUT /api/reports/{id}`:
-    - Fields: `title?`, `description?`, `type?`, `locationName?`, `latitude?`, `longitude?`, `subCategoryId?`, `dateReported?`, `imageIdsToRemove[]`, `newImages[]`
-  - Limit: 10MB per image
-
-### 5.5 Where to Find All Endpoints
-
-- Use **`API_DOCUMENTATION_FULL.md`** in the repo root.  
-  It includes:
-  - All paths, methods, and query/body parameters
-  - Example success and error responses
-  - Notes on pagination, filtering, and DTO shapes.
+| Group           | Base Path            | Description                                |
+|-----------------|----------------------|--------------------------------------------|
+| Authentication  | `/api/auth`          | Signup, login, Google OAuth, token refresh, password management |
+| Reports         | `/api/reports`       | CRUD for lost/found reports with images and geolocation |
+| Categories      | `/api/categories`    | Category and subcategory management        |
+| Subcategories   | `/api/subcategories` | Subcategory listings and filtering         |
+| Users           | `/api/users`         | Profile management, user lookup            |
+| Chat            | `/api/chat`          | 1-to-1 messaging sessions                 |
+| Notifications   | `/api/notifications` | In-app notifications, device registration  |
+| Matching        | `/api/matching`      | Automatic and manual report matching       |
+| Dashboard       | `/api/home`          | Home feed and statistics                   |
+| Admin           | `/api/admin`         | Report moderation and user verification    |
 
 ---
 
-## 6. Roles & Permissions
+## Authentication
 
-### Anonymous
+The API uses a **JWT + Refresh Token** authentication model with support for multi-device sessions.
 
-- Can:
-  - View **public** reports:
-    - `GET /api/reports`
-    - `GET /api/reports/{id}`
-    - `GET /api/reports/nearby`
-  - View dashboard:
-    - `GET /api/home/dashboard`
-  - View categories mapping:
-    - `GET /api/categories/mapping`
-  - Get VAPID public key:
-    - `GET /api/notifications/vapid-public-key`
-- Visibility rule:
-  - Only reports with `lifecycleStatus` in **Approved / Matched / Closed** are returned.
+| Step | Endpoint | Description |
+|------|----------|-------------|
+| 1    | `POST /api/auth/signup` | Register with email/password |
+| 2    | `GET /api/auth/verify-account` | Verify email with OTP code |
+| 3    | `POST /api/auth/login` | Obtain access + refresh tokens |
+| 4    | `POST /api/auth/refresh-token` | Rotate tokens (old token is revoked) |
+| 5    | `POST /api/auth/logout` | Invalidate refresh token |
 
-### Authenticated User (`User` role)
+**Token usage:** Include the access token in the `Authorization` header as `Bearer <token>`.
 
-- Everything anonymous can do, plus:
-  - Manage own account:
-    - `GET /api/auth/me`, `GET /api/users/me`
-    - Change password, change email, delete account, logout
-  - Manage own reports:
-    - `POST /api/reports`
-    - `GET /api/reports/my-reports`
-    - `PUT /api/reports/{id}` (if owner)
-    - `PUT /api/reports/{id}/status` (subject to lifecycle rules)
-    - `DELETE /api/reports/{id}` (if owner)
-  - Access their own reports regardless of lifecycle (including `Pending`, `Rejected`, etc.).
-  - View other users’ profiles:
-    - `GET /api/users/{id}`
-  - View a user’s reports:
-    - `GET /api/users/{id}/reports`
-  - Save / unsave reports:
-    - `POST /api/reports/{id}/save`, `DELETE /api/reports/{id}/save`
-  - Report abuse for a report:
-    - `POST /api/reports/{id}/report`
-  - Chat:
-    - `/api/chat/sessions` and `/api/chat/sessions/{sessionId}/messages`
-  - Notifications:
-    - `/api/notifications`, `/api/notifications/unread`, `/api/notifications/{id}/read`, `/api/notifications/mark-all-read`, `/api/notifications/register-device`
-  - Matching:
-    - `/api/matching/run/{reportId}` (manual trigger)
-    - `/api/matching/{reportId}` (view matches)
-
-### Admin (`Admin` role)
-
-- Access to `/api/admin/**`:
-  - `GET /api/admin/reports`
-    - All reports (any `lifecycleStatus`)
-  - `PUT /api/admin/reports/{id}/approve`
-  - `PUT /api/admin/reports/{id}/reject`
-  - `PUT /api/admin/reports/{id}/flag`
-  - `PUT /api/admin/reports/{id}/archive`
-  - `DELETE /api/admin/reports/{id}`
-  - `PUT /api/admin/users/{id}/verify`
-- Admin is also exempt from lifecycle visibility restrictions on individual reports.
+**Google Sign-In:** Supported via `POST /api/auth/google` with a Google ID token.
 
 ---
 
-## 7. Realtime & Notifications
+## Real-Time Communication
 
-### 7.1 SignalR Connections
+### SignalR Hubs
 
-- **Chat hub:** `BASE_URL/chatHub`
-- **Notification hub:** `BASE_URL/notificationHub`
+| Hub                  | URL                             | Purpose                    |
+|----------------------|---------------------------------|----------------------------|
+| Chat Hub             | `{BASE_URL}/chatHub`           | Real-time messaging        |
+| Notification Hub     | `{BASE_URL}/notificationHub`   | Live notification delivery |
 
-**Authentication in SignalR:**
+**Authentication:** Pass the JWT as a query parameter:
 
-- Pass the JWT **access token** as a query string parameter:
-
-```text
-BASE_URL/chatHub?access_token=<JWT>
-BASE_URL/notificationHub?access_token=<JWT>
+```
+/chatHub?access_token=<JWT>
+/notificationHub?access_token=<JWT>
 ```
 
-The backend is configured to extract tokens from `access_token` for these hub paths.
+### Push Notifications (Firebase)
 
-### 7.2 Notification Flows
-
-See `API_DOCUMENTATION_FULL.md` for full DTO shapes. High‑level types:
-
-- `match` – A matching report was found for a user’s report.
-- `interested` – Someone expressed interest in a report (`POST /api/reports/{id}/interested`).
-- `new_message` – New chat message in a session.
-- `status_update` – Report lifecycle/status changed (e.g. Approved, Closed).
-- `location_alert` – A report appears near a saved/interest location.
-
-**Push notifications (Firebase):**
-
-- VAPID public key:
-  - `GET /api/notifications/vapid-public-key`
-- Register device token:
-  - `POST /api/notifications/register-device` with:
-
-    ```json
-    {
-      "token": "<FCM device token>",
-      "platform": "android" // or "ios" or "web"
-    }
-    ```
-
-When triggers occur (match, new message, status update, etc.), the backend:
-
-- Saves a Notification entity,
-- Attempts to send a SignalR message to connected clients,
-- Attempts to send a push notification via Firebase if configured.
+1. Retrieve the VAPID key: `GET /api/notifications/vapid-public-key`
+2. Register the device token: `POST /api/notifications/register-device`
+3. Notifications are sent automatically on matches, messages, status updates, and location alerts
 
 ---
 
-## 8. Matching Flow
+## Roles & Permissions
 
-### 8.1 How Matching Works (Backend)
+| Role      | Access Level                                                                       |
+|-----------|------------------------------------------------------------------------------------|
+| Anonymous | View approved/matched/closed reports, dashboard, categories                        |
+| User      | All anonymous access + manage own reports, chat, notifications, matching, profile  |
+| Admin     | All user access + approve/reject/flag/archive reports, delete reports, verify users |
 
-The `MatchingService`:
-
-- For a given `reportId`:
-  - Loads the source report (with subcategory and location).
-  - Finds candidate reports:
-    - Same subcategory
-    - Different user
-    - Not Closed
-  - Calculates a **similarity score (0–100)** based on:
-    - Same subcategory (base score)
-    - Distance (Haversine between lat/lng)
-    - Keyword overlap in title + description
-  - Stores matches in `ReportMatches` with the score.
-  - If score ≥ 80:
-    - Optionally sets source `Status` to `Matched`
-    - Sets `MatchPercentage`
-    - Sends a **match** notification to the owner.
-
-### 8.2 How Matching Is Triggered
-
-There are two ways:
-
-1. **Automatic (background)**
-   - After a report is created (`POST /api/reports`), the backend triggers `RunMatchingAsync(report.Id)` in a **fire‑and‑forget background task**.  
-     This does *not* block the create API.
-
-2. **Manual API**
-   - `POST /api/matching/run/{reportId}`  
-     Runs matching immediately and returns matches.
-   - `GET /api/matching/{reportId}`  
-     Lists previously computed matches for that report.
-
-Frontend can rely on automatic matching, and optionally expose a “refresh matches” button that calls the manual endpoint.
+> Anonymous users only see reports with lifecycle status: **Approved**, **Matched**, or **Closed**. Report owners can always see their own reports regardless of status.
 
 ---
 
-## 9. Common Pitfalls / Troubleshooting
+## Health Checks
 
-### 9.1 CORS Errors
-
-Symptoms: frontend gets  CORS errors in the browser / mobile web.
-
-- Ensure `Cors:AllowedOrigins` or `Cors__AllowedOrigins` includes the **exact** frontend origin(s), e.g.:
-
-  ```json
-  "Cors": {
-    "AllowedOrigins": [ "https://my-flutter-web.app" ]
-  }
-  ```
-
-  or:
-
-  ```text
-  Cors__AllowedOrigins=https://my-flutter-web.app
-  ```
-
-### 9.2 JWT Expired / Unauthorized (401)
-
-- Access tokens have limited lifetime (`JwtSettings:ExpiryMinutes`).
-- When receiving 401 due to expiration:
-  - Call `POST /api/auth/refresh-token` with the stored refresh token.
-  - Update stored `accessToken` and `refreshToken`.
-- On logout:
-  - Call `POST /api/auth/logout` so backend invalidates the refresh token.
-
-### 9.3 Image Upload Failures
-
-- Check:
-  - Content‑Type is `multipart/form-data`.
-  - Field names are correct: `images`, `newImages`, `profilePicture`, etc. (see docs).
-  - File size:
-    - Profile picture ≤ **5MB**
-    - Report image ≤ **10MB**
-  - Only allowed extensions: `.jpg`, `.jpeg`, `.png`, `.gif`, `.webp`.
-
-### 9.4 SignalR Connection Issues
-
-- Ensure:
-  - `access_token` query parameter is set with a valid JWT.
-  - Base URL uses **HTTPS** in production.
-  - CORS allows WebSockets/long polling (same origin config as REST).
-- If you see unauthorized errors:
-  - Verify that the token is not expired and contains the correct user ID and roles.
-
-### 9.5 Production Config Pitfalls
-
-- Missing or weak `JwtSettings:SecretKey`:
-  - In Production, startup will throw if the key is missing/too short.
-- Wrong DB connection:
-  - Check logs and `/health` endpoints; confirm the DB and migrations are applied.
-- Firebase misconfiguration:
-  - The app will log a warning and use stub push notifications (no push) instead of crashing.
+| Endpoint        | Purpose                              |
+|-----------------|--------------------------------------|
+| `/health`       | Overall application health           |
+| `/health/ready` | Readiness probe (database + dependencies) |
+| `/health/live`  | Liveness probe                       |
 
 ---
 
-## 10. Contribution & Conventions
+## Rate Limiting
 
-### 10.1 General Guidelines
+The API enforces per-policy rate limits to prevent abuse:
 
-- **Do not** change existing API contracts lightly.  
-  - Responses should keep the standard `{ success, message, data, errors }` envelope.
-  - Any endpoint additions/changes must be mirrored in `API_DOCUMENTATION_FULL.md`.
-- Follow existing patterns:
-  - Use DTOs in `LostAndFound.Application.DTOs.*`
-  - Put business logic in Application services, not in controllers.
-  - Use AutoMapper mappings in `MappingProfile`.
-  - Use `BaseResponse<T>` for results.
-
-### 10.2 Branching / Commits
-
-There is no strict enforced branching strategy in this repo, but recommended:
-
-- Create feature branches per change:
-  - `feature/<short-description>`
-  - `bugfix/<short-description>`
-- Use clear, concise commit messages:
-  - Focus on *what* and *why*, e.g. `feat: add report lifecycle filtering to public feed`.
-
-### 10.3 Adding New Endpoints
-
-When extending the API:
-
-- Place controllers under `LostAndFound.Api/Controllers`.
-- Use proper attributes:
-  - `[ApiController]`, `[Route("api/[controller]")]`
-  - `[Authorize]` / `[AllowAnonymous]` / `[Authorize(Roles = "Admin")]`
-- Reuse the existing validation and response patterns:
-  - Use `BaseResponse<T>.SuccessResult(...)` / `.FailureResult(...)`.
-  - Validate models using FluentValidation where appropriate.
-- Update:
-  - `API_DOCUMENTATION_FULL.md`
-  - Any relevant diagrams or README sections if behavior changes.
+| Policy   | Limit              | Applied To                     |
+|----------|--------------------|---------------------------------|
+| `auth`   | 5 requests/min     | Authentication endpoints       |
+| `refresh`| 20 requests/min    | Token refresh endpoint         |
+| `upload` | 10 requests/min    | File upload endpoints          |
+| `api`    | 100 requests/min   | All other endpoints (default)  |
 
 ---
 
-This README is intended as a **single entry point** for:
+## Known Limitations
 
-- Frontend developers (Flutter team) integrating with the API.
-- DevOps/infra engineers deploying and configuring the backend.
-- Contributors who want to extend the system without breaking existing behavior.  
+The following items are acknowledged as areas for future improvement:
 
-For endpoint‑level details, always refer to **`API_DOCUMENTATION_FULL.md`**. 
+- **Image validation** relies on file extension only; content-type verification is not enforced
+- **Nearby reports** query loads candidates into memory before filtering by distance
+- **Saved reports** queries may exhibit N+1 patterns under high volume
+- **Path traversal** protection on image uploads is basic
+
+These do not affect core functionality or demo stability.
+
+---
+
+## Contributing
+
+1. Follow the existing Clean Architecture patterns and conventions
+2. Use `BaseResponse<T>` for all API responses
+3. Place business logic in Application services, not controllers
+4. Use FluentValidation for request validation
+5. Update [`API_DOCUMENTATION_FULL.md`](API_DOCUMENTATION_FULL.md) when adding or modifying endpoints
+6. Use clear commit messages: `feat:`, `fix:`, `refactor:`, `docs:`
+
+---
+
+## Project Structure
+
+```
+LostAndFound/
+  LostAndFound.Domain/
+    Entities/           Domain entities (AppUser, Report, ChatSession, etc.)
+    Enums/              Enumerations (ReportType, ReportLifecycleStatus, Gender, etc.)
+
+  LostAndFound.Application/
+    DTOs/               Data transfer objects organized by feature
+    Interfaces/         Service and repository contracts
+    Services/           Business logic implementations
+    Validators/         FluentValidation rules
+    Features/           MediatR command/query handlers
+    Common/             Shared types (BaseResponse, pagination)
+    Mapping/            AutoMapper profiles
+
+  LostAndFound.Infrastructure/
+    Persistence/
+      Config/           EF Core entity configurations
+      Repositories/     Repository and Unit of Work implementations
+      Migrations/       EF Core migrations
+    Services/           Infrastructure services (Email, OTP, Firebase)
+
+  LostAndFound.Api/
+    Controllers/        API endpoints
+    Hubs/               SignalR hubs (Chat, Notifications)
+    Middleware/         Custom middleware (error handling, logging)
+    wwwroot/           Static files and uploads
+    Program.cs         Application entry point and DI configuration
+```
+
+---
+
+*For detailed endpoint documentation, see [`API_DOCUMENTATION_FULL.md`](API_DOCUMENTATION_FULL.md).*
