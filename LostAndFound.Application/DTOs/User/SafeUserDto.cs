@@ -7,6 +7,7 @@ namespace LostAndFound.Application.DTOs.User
         public string Email { get; set; } = string.Empty;
         public string Phone { get; set; } = string.Empty;
         public bool IsVerified { get; set; }
+        public List<string> Roles { get; set; } = new List<string>();
         public DateTime? DateOfBirth { get; set; }
         public string? Gender { get; set; }
         public string? ProfilePictureUrl { get; set; }

@@ -1,13 +1,17 @@
 using System;
+using System.Text.Json.Serialization;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 
 namespace LostAndFound.Application.DTOs.Report
 {
     public class ReportFilterDto
     {
         /// <summary>
-        /// When true (public view), restricts results to Approved/Matched/Closed when no explicit Status filter is provided.
-        /// Set by server only; never bind from client query for security.
+        /// When true (public view), restricts results to Approved/Matched/Closed.
+        /// Set by server only; client cannot override via query string.
         /// </summary>
+        [BindNever]
+        [JsonIgnore]
         public bool ForPublicView { get; set; }
 
         public string? Type { get; set; }
