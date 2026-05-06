@@ -8,8 +8,7 @@ namespace LostAndFound.Application.Interfaces
     {
         Task<ReportDto> CreateAsync(CreateReportDto dto, int userId);
         /// <summary>
-        /// Gets a report by ID. When requesterUserId is null (anonymous) or not owner/admin,
-        /// only returns reports with LifecycleStatus Approved/Matched/Closed.
+        /// Gets a report by ID.
         /// </summary>
         Task<ReportDto?> GetByIdAsync(int id, int? requesterUserId = null, bool isAdmin = false);
         Task<(List<ReportDto> Reports, int TotalCount)> GetAllAsync(ReportFilterDto filter);

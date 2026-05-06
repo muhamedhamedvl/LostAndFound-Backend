@@ -20,17 +20,20 @@ namespace LostAndFound.Api.Controllers
         private readonly IReportService _reportService;
         private readonly IUnitOfWork _unitOfWork;
         private readonly INotificationService _notificationService;
+        private readonly IAdminUserService _adminUserService;
         private readonly ILogger<AdminController> _logger;
 
         public AdminController(
             IReportService reportService,
             IUnitOfWork unitOfWork,
             INotificationService notificationService,
+            IAdminUserService adminUserService,
             ILogger<AdminController> logger)
         {
             _reportService = reportService;
             _unitOfWork = unitOfWork;
             _notificationService = notificationService;
+            _adminUserService = adminUserService;
             _logger = logger;
         }
 
@@ -74,123 +77,6 @@ namespace LostAndFound.Api.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error retrieving admin reports");
-                return StatusCode(500, BaseResponse<object>.FailureResult("An unexpected error occurred."));
-            }
-        }
-
-        /// <summary>
-        /// Approve a report
-        /// </summary>
-        /// <remarks>
-        /// Sets the report lifecycle status to Approved, making it publicly visible to all users.
-        /// The report owner is notified of the status change. Requires Admin role.
-        /// </remarks>
-        /// <param name="id">The report ID to approve</param>
-        /// <response code="200">Report approved successfully</response>
-        /// <response code="401">User is not authenticated</response>
-        /// <response code="403">User does not have Admin role</response>
-        /// <response code="404">Report not found or invalid status transition</response>
-        [HttpPut("reports/{id}/approve")]
-        [SwaggerOperation(
-            Summary = "Approve a report",
-            Description = "Approve a report and make it publicly visible. The report owner is notified. Requires Admin role."
-        )]
-        [ProducesResponseType(typeof(BaseResponse<ReportDto>), StatusCodes.Status200OK)]
-        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-        [ProducesResponseType(StatusCodes.Status403Forbidden)]
-        [ProducesResponseType(typeof(BaseResponse<ReportDto>), StatusCodes.Status404NotFound)]
-        public async Task<IActionResult> ApproveReport(int id)
-        {
-            try
-            {
-                var result = await _reportService.UpdateStatusAsync(id, "Approved", 0, isAdmin: true);
-                if (result == null)
-                    return NotFound(BaseResponse<ReportDto>.FailureResult("Report not found or invalid status transition"));
-
-                await _notificationService.NotifyReportStatusChangeAsync(id, "Approved");
-                return Ok(BaseResponse<ReportDto>.SuccessResult(result, "Report approved successfully"));
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error approving report {ReportId}", id);
-                return StatusCode(500, BaseResponse<object>.FailureResult("An unexpected error occurred."));
-            }
-        }
-
-        /// <summary>
-        /// Reject a report
-        /// </summary>
-        /// <remarks>
-        /// Sets the report lifecycle status to Rejected due to policy violation or invalid data.
-        /// The report is hidden from public view. The report owner is notified. Requires Admin role.
-        /// </remarks>
-        /// <param name="id">The report ID to reject</param>
-        /// <response code="200">Report rejected successfully</response>
-        /// <response code="401">User is not authenticated</response>
-        /// <response code="403">User does not have Admin role</response>
-        /// <response code="404">Report not found or invalid status transition</response>
-        [HttpPut("reports/{id}/reject")]
-        [SwaggerOperation(
-            Summary = "Reject a report",
-            Description = "Reject a report due to policy violation or invalid data. The report owner is notified. Requires Admin role."
-        )]
-        [ProducesResponseType(typeof(BaseResponse<ReportDto>), StatusCodes.Status200OK)]
-        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-        [ProducesResponseType(StatusCodes.Status403Forbidden)]
-        [ProducesResponseType(typeof(BaseResponse<ReportDto>), StatusCodes.Status404NotFound)]
-        public async Task<IActionResult> RejectReport(int id)
-        {
-            try
-            {
-                var result = await _reportService.UpdateStatusAsync(id, "Rejected", 0, isAdmin: true);
-                if (result == null)
-                    return NotFound(BaseResponse<ReportDto>.FailureResult("Report not found or invalid status transition"));
-
-                await _notificationService.NotifyReportStatusChangeAsync(id, "Rejected");
-                return Ok(BaseResponse<ReportDto>.SuccessResult(result, "Report rejected successfully"));
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error rejecting report {ReportId}", id);
-                return StatusCode(500, BaseResponse<object>.FailureResult("An unexpected error occurred."));
-            }
-        }
-
-        /// <summary>
-        /// Flag a report for review
-        /// </summary>
-        /// <remarks>
-        /// Sets the report lifecycle status to Flagged, marking it as suspicious or requiring further review.
-        /// The report is hidden from public view. The report owner is notified. Requires Admin role.
-        /// </remarks>
-        /// <param name="id">The report ID to flag</param>
-        /// <response code="200">Report flagged successfully</response>
-        /// <response code="401">User is not authenticated</response>
-        /// <response code="403">User does not have Admin role</response>
-        /// <response code="404">Report not found or invalid status transition</response>
-        [HttpPut("reports/{id}/flag")]
-        [SwaggerOperation(
-            Summary = "Flag a report for review",
-            Description = "Flag a report for further review or mark as suspicious. The report owner is notified. Requires Admin role."
-        )]
-        [ProducesResponseType(typeof(BaseResponse<ReportDto>), StatusCodes.Status200OK)]
-        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-        [ProducesResponseType(StatusCodes.Status403Forbidden)]
-        [ProducesResponseType(typeof(BaseResponse<ReportDto>), StatusCodes.Status404NotFound)]
-        public async Task<IActionResult> FlagReport(int id)
-        {
-            try
-            {
-                var result = await _reportService.UpdateStatusAsync(id, "Flagged", 0, isAdmin: true);
-                if (result == null)
-                    return NotFound(BaseResponse<ReportDto>.FailureResult("Report not found or invalid status transition"));
-
-                await _notificationService.NotifyReportStatusChangeAsync(id, "Flagged");
-                return Ok(BaseResponse<ReportDto>.SuccessResult(result, "Report flagged successfully"));
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error flagging report {ReportId}", id);
                 return StatusCode(500, BaseResponse<object>.FailureResult("An unexpected error occurred."));
             }
         }
@@ -315,6 +201,44 @@ namespace LostAndFound.Api.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error verifying user {UserId}", id);
+                return StatusCode(500, BaseResponse<object>.FailureResult("An unexpected error occurred."));
+            }
+        }
+
+        /// <summary>
+        /// Delete any user account by admin.
+        /// </summary>
+        /// <remarks>
+        /// Performs a safe administrative deletion (soft delete) to preserve data integrity and history.
+        /// Also revokes active refresh/device tokens for the target user. Requires Admin role.
+        /// </remarks>
+        /// <param name="id">The user ID to delete</param>
+        /// <response code="204">User deleted successfully</response>
+        /// <response code="401">User is not authenticated</response>
+        /// <response code="403">User does not have Admin role</response>
+        /// <response code="404">User not found</response>
+        [HttpDelete("users/{id}")]
+        [SwaggerOperation(
+            Summary = "Delete any user account",
+            Description = "Admin-only user deletion endpoint. Performs safe soft delete and token revocation."
+        )]
+        [ProducesResponseType(StatusCodes.Status204NoContent)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(typeof(BaseResponse<object>), StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> DeleteUser(int id)
+        {
+            try
+            {
+                var deleted = await _adminUserService.DeleteUserAsync(id);
+                if (!deleted)
+                    return NotFound(BaseResponse<object>.FailureResult("User not found"));
+
+                return NoContent();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error deleting user {UserId}", id);
                 return StatusCode(500, BaseResponse<object>.FailureResult("An unexpected error occurred."));
             }
         }

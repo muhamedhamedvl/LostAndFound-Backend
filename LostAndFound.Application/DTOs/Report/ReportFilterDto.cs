@@ -7,8 +7,7 @@ namespace LostAndFound.Application.DTOs.Report
     public class ReportFilterDto
     {
         /// <summary>
-        /// When true (public view), restricts results to Approved/Matched/Closed.
-        /// Set by server only; client cannot override via query string.
+        /// Flag set by server only; client cannot override via query string.
         /// </summary>
         [BindNever]
         [JsonIgnore]

@@ -17,8 +17,8 @@ namespace LostAndFound.Domain.Entities
 
         public ReportStatus Status { get; set; } = ReportStatus.Open;
 
-        // New lifecycle status for moderation and state transitions, kept alongside legacy Status for backward compatibility.
-        public ReportLifecycleStatus LifecycleStatus { get; set; } = ReportLifecycleStatus.Pending;
+        // Lifecycle remains available for optional moderation actions, but reports are published immediately by default.
+        public ReportLifecycleStatus LifecycleStatus { get; set; } = ReportLifecycleStatus.Approved;
 
         public DateTime? DateReported { get; set; }
 

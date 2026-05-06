@@ -3,8 +3,10 @@ using LostAndFound.Application.DTOs.Report;
 using LostAndFound.Application.Interfaces;
 using LostAndFound.Domain.Entities;
 using LostAndFound.Domain.Enums;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace LostAndFound.Application.Services
 {
@@ -14,13 +16,20 @@ namespace LostAndFound.Application.Services
         private readonly IMapper _mapper;
         private readonly IImageService _imageService;
         private readonly IServiceScopeFactory _scopeFactory;
+        private readonly ILogger<ReportService> _logger;
 
-        public ReportService(IUnitOfWork unitOfWork, IMapper mapper, IImageService imageService, IServiceScopeFactory scopeFactory)
+        public ReportService(
+            IUnitOfWork unitOfWork,
+            IMapper mapper,
+            IImageService imageService,
+            IServiceScopeFactory scopeFactory,
+            ILogger<ReportService> logger)
         {
             _unitOfWork = unitOfWork;
             _mapper = mapper;
             _imageService = imageService;
             _scopeFactory = scopeFactory;
+            _logger = logger;
         }
 
         private IQueryable<Report> ReportsWithIncludes()
@@ -46,7 +55,8 @@ namespace LostAndFound.Application.Services
                 Description = dto.Description,
                 Type = reportType,
                 Status = ReportStatus.Open,
-                LifecycleStatus = ReportLifecycleStatus.Pending,
+                // Published immediately; moderation remains optional via Admin endpoints.
+                LifecycleStatus = ReportLifecycleStatus.Approved,
                 LocationName = dto.LocationName,
                 Latitude = dto.Latitude,
                 Longitude = dto.Longitude,
@@ -85,17 +95,72 @@ namespace LostAndFound.Application.Services
 
             var created = await ReportsWithIncludes().FirstOrDefaultAsync(r => r.Id == report.Id);
 
-            // Fire-and-forget: trigger matching in background (non-blocking, new scope for scoped services)
+            // Prepare optional first image copy for non-blocking AI indexing.
+            byte[]? firstImageBytes = null;
+            string? firstImageFileName = null;
+            string? firstImageContentType = null;
+            var firstImage = dto.Images?.FirstOrDefault(i => i is { Length: > 0 });
+            if (firstImage != null)
+            {
+                await using var ms = new MemoryStream();
+                await firstImage.CopyToAsync(ms);
+                firstImageBytes = ms.ToArray();
+                firstImageFileName = firstImage.FileName;
+                firstImageContentType = firstImage.ContentType;
+            }
+
+            // Fire-and-forget: trigger AI indexing + matching in background (non-blocking, new scope for scoped services)
             var reportId = report.Id;
+            var isPersonReport = reportType is ReportType.LostPerson or ReportType.FoundPerson;
             _ = Task.Run(async () =>
             {
                 try
                 {
                     await using var scope = _scopeFactory.CreateAsyncScope();
+                    var aiService = scope.ServiceProvider.GetService<IAiService>();
+                    if (aiService != null)
+                    {
+                        try
+                        {
+                            await aiService.AddTextAsync(reportId.ToString(), report.Description);
+
+                            if (firstImageBytes is { Length: > 0 })
+                            {
+                                await using var imageStream = new MemoryStream(firstImageBytes);
+                                var formFile = new FormFile(
+                                    imageStream,
+                                    0,
+                                    imageStream.Length,
+                                    "image",
+                                    string.IsNullOrWhiteSpace(firstImageFileName) ? "report-image.jpg" : firstImageFileName)
+                                {
+                                    Headers = new HeaderDictionary(),
+                                    ContentType = string.IsNullOrWhiteSpace(firstImageContentType) ? "application/octet-stream" : firstImageContentType
+                                };
+
+                                if (isPersonReport)
+                                {
+                                    await aiService.AddFaceAsync(reportId.ToString(), formFile);
+                                }
+                                else
+                                {
+                                    await aiService.AddImageAsync(reportId.ToString(), formFile);
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "AI indexing failed for report {ReportId}.", reportId);
+                        }
+                    }
+
                     var matchingService = scope.ServiceProvider.GetRequiredService<IMatchingService>();
                     await matchingService.RunMatchingAsync(reportId);
                 }
-                catch { /* Don't fail report creation; matching is best-effort */ }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Background matching failed for report {ReportId}.", reportId);
+                }
             });
 
             return _mapper.Map<ReportDto>(created);
@@ -106,17 +171,7 @@ namespace LostAndFound.Application.Services
             var report = await ReportsWithIncludes().FirstOrDefaultAsync(r => r.Id == id);
             if (report == null) return null;
 
-            // Owners and admins can access any report
-            var isOwner = requesterUserId.HasValue && report.CreatedById == requesterUserId.Value;
-            if (isOwner || isAdmin)
-                return _mapper.Map<ReportDto>(report);
-
-            // Anonymous or other users: only Approved/Matched/Closed
-            if (report.LifecycleStatus != ReportLifecycleStatus.Approved
-                && report.LifecycleStatus != ReportLifecycleStatus.Matched
-                && report.LifecycleStatus != ReportLifecycleStatus.Closed)
-                return null;
-
+            // Reports are visible by default. Lifecycle is now optional moderation metadata.
             return _mapper.Map<ReportDto>(report);
         }
 
@@ -142,13 +197,7 @@ namespace LostAndFound.Application.Services
                     query = query.Where(r => r.Status == reportStatus);
                 }
             }
-            else if (filter.ForPublicView)
-            {
-                // Public view: only show Approved, Matched, Closed (hide Pending, Rejected, Flagged, Archived)
-                query = query.Where(r => r.LifecycleStatus == ReportLifecycleStatus.Approved
-                    || r.LifecycleStatus == ReportLifecycleStatus.Matched
-                    || r.LifecycleStatus == ReportLifecycleStatus.Closed);
-            }
+            // Public view no longer enforces moderation visibility constraints.
 
             if (!string.IsNullOrEmpty(filter.Search))
                 query = query.Where(r => r.Title.Contains(filter.Search) || r.Description.Contains(filter.Search) || (r.LocationName != null && r.LocationName.Contains(filter.Search)));
@@ -196,11 +245,7 @@ namespace LostAndFound.Application.Services
         public async Task<List<NearbyReportDto>> GetNearbyAsync(double latitude, double longitude, double radiusKm, string? type, int page, int pageSize)
         {
             var query = ReportsWithIncludes()
-                .Where(r => r.Latitude.HasValue && r.Longitude.HasValue)
-                // Public endpoint: only show approved reports
-                .Where(r => r.LifecycleStatus == ReportLifecycleStatus.Approved
-                    || r.LifecycleStatus == ReportLifecycleStatus.Matched
-                    || r.LifecycleStatus == ReportLifecycleStatus.Closed);
+                .Where(r => r.Latitude.HasValue && r.Longitude.HasValue);
 
             // Filter by type if provided (Lost or Found)
             if (!string.IsNullOrEmpty(type) && !string.Equals(type, "All", StringComparison.OrdinalIgnoreCase))
@@ -331,8 +376,8 @@ namespace LostAndFound.Application.Services
                 var current = report.LifecycleStatus;
                 var allowed = current switch
                 {
-                    // User can't change Pending — must wait for admin approval
-                    ReportLifecycleStatus.Pending => Array.Empty<ReportLifecycleStatus>(),
+                    // Pending can still exist for legacy rows; owner can close it.
+                    ReportLifecycleStatus.Pending => new[] { ReportLifecycleStatus.Closed },
                     // User can close (withdraw) their approved report
                     ReportLifecycleStatus.Approved => new[] { ReportLifecycleStatus.Closed },
                     // User can close a matched report

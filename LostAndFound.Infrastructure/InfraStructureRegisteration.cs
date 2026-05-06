@@ -78,6 +78,7 @@ namespace LostAndFound.Infrastructure
             services.AddScoped<ISavedReportService, SavedReportService>();
             services.AddScoped<IHomeService, HomeService>();
             services.AddScoped<IDeviceTokenService, DeviceTokenService>();
+            services.AddScoped<IAdminUserService, AdminUserService>();
             // IPushNotificationService is registered in Api Program.cs (Firebase or Stub)
 
             return services;

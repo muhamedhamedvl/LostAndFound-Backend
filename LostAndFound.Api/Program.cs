@@ -17,6 +17,9 @@ using Microsoft.OpenApi.Models;
 using Serilog;
 using System.Text;
 using LostAndFound.Api.Services.Interfaces;
+using LostAndFound.Application.Options;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Options;
 using System.Net;
 
 namespace LostAndFound.Api
@@ -33,8 +36,12 @@ namespace LostAndFound.Api
 
             try
             {
+
+
                 Log.Information("Starting LostAndFound API");
                 var builder = WebApplication.CreateBuilder(args);
+
+                // In production, set secrets via environment variables (e.g. Gemini__ApiKey).
 
                 // Controllers
                 builder.Services.AddControllers()
@@ -88,6 +95,19 @@ namespace LostAndFound.Api
 
                 // Infrastructure
                 builder.Services.AddInfrastructureServices(builder.Configuration);
+
+                // Gemini embeddings + Modal vector search
+                builder.Services.Configure<AiServiceOptions>(builder.Configuration.GetSection(AiServiceOptions.SectionName));
+                builder.Services.Configure<GeminiOptions>(builder.Configuration.GetSection(GeminiOptions.SectionName));
+                builder.Services.Configure<ModalOptions>(builder.Configuration.GetSection(ModalOptions.SectionName));
+                builder.Services.AddHttpClient<IEmbeddingService, GeminiEmbeddingService>();
+                builder.Services.AddHttpClient<IModalService, ModalService>();
+                builder.Services.AddHttpClient<IAiService, AiService>((sp, client) =>
+                {
+                    var options = sp.GetRequiredService<IOptions<AiServiceOptions>>().Value;
+                    client.BaseAddress = new Uri(options.GetNormalizedBaseUrl());
+                    client.Timeout = TimeSpan.FromSeconds(Math.Max(1, options.TimeoutSeconds == 0 ? 60 : options.TimeoutSeconds));
+                });
 
                 // Firebase options (bind from config / User Secrets)
                 builder.Services.Configure<FirebaseOptions>(builder.Configuration.GetSection(FirebaseOptions.SectionName));
@@ -277,7 +297,14 @@ namespace LostAndFound.Api
                 // Seed Admin + Roles
                 using (var scope = app.Services.CreateScope())
                 {
-                    await LostAndFound.Infrastructure.Persistence.DbSeeder.SeedAsync(scope.ServiceProvider);
+                    try
+                    {
+                        await LostAndFound.Infrastructure.Persistence.DbSeeder.SeedAsync(scope.ServiceProvider);
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Warning(ex, "DbSeeder failed at startup. Continuing app boot so Swagger/API remain reachable.");
+                    }
                 }
 
                 // Swagger security in Production (IP whitelist + Basic Auth)
@@ -374,7 +401,7 @@ namespace LostAndFound.Api
                 app.UseSwagger();
                 app.UseSwaggerUI(c =>
                 {
-                    c.SwaggerEndpoint("/swagger/v1/swagger.json", "LostAndFound API v1");
+                    c.SwaggerEndpoint("/swagger/v1/swagger.json", "API v1");
                     c.RoutePrefix = "swagger";
                 });
 
@@ -413,5 +440,6 @@ namespace LostAndFound.Api
                 Log.CloseAndFlush();
             }
         }
+
     }
 }
