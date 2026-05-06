@@ -69,14 +69,6 @@ cd LostAndFound.Api
 dotnet run
 ```
 
-### 📸 Project Screenshots
-![0](ScreenShots/verfication.jpg)
-![1](ScreenShots/1.png)
-![2](ScreenShots/2.png)
-![3](ScreenShots/3.png)
-![4](ScreenShots/4.png)
-![5](ScreenShots/5.png)
-![6](ScreenShots/6.png)
 
 ## API Overview
 
@@ -138,3 +130,13 @@ dotnet publish LostAndFound.Api -c Release -o ./out
 Set required environment variables: `ConnectionStrings__DefaultConnection`, `JwtSettings__SecretKey` (min 32 chars), `Cors__AllowedOrigins`.
 
 Firebase setup: [`docs/FIREBASE_PUSH_SETUP.md`](docs/FIREBASE_PUSH_SETUP.md)
+
+### 📸 Project Screenshots
+
+![1](ScreenShots/1.png)
+![2](ScreenShots/2.png)
+![3](ScreenShots/3.png)
+![4](ScreenShots/4.png)
+![5](ScreenShots/5.png)
+![6](ScreenShots/6.png)
+![0](ScreenShots/verfication.jpg)
