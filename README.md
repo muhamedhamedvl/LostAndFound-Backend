@@ -1,16 +1,10 @@
 
+https://github.com/user-attachments/assets/dec97e8b-e934-4a42-9715-31592ed56d88
+Uploading video_2026-05-16_01-21-12.mp4…
 # Wasit Kheir — Lost & Found Platform
 
 > RESTful API for managing lost and found reports — built with **.NET 9** and **Clean Architecture**.
 
-<p align="center">
-  <a href="https://github.com/user-attachments/assets/4f40e850-e766-44ae-860f-8597f73526cb">
-    <img src="https://img.youtube.com/vi/VIDEO_ID/maxresdefault.jpg" width="700" alt="Demo Video"/>
-  </a>
-</p>
-<p align="center">
-  🎥 Click the image to watch the demo
-</p>
 
 ## 🚀 Live Demo
 
