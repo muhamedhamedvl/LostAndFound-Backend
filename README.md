@@ -2,7 +2,7 @@
 
 > RESTful API for managing lost and found reports — built with **.NET 9** and **Clean Architecture**.
 
-https://github.com/user-attachments/assets/82ca8113-f479-49b9-80c6-3043fb26a702
+
 
 ## 🚀 Live Demo
 
@@ -131,6 +131,8 @@ dotnet publish LostAndFound.Api -c Release -o ./out
 Set required environment variables: `ConnectionStrings__DefaultConnection`, `JwtSettings__SecretKey` (min 32 chars), `Cors__AllowedOrigins`.
 
 Firebase setup: [`docs/FIREBASE_PUSH_SETUP.md`](docs/FIREBASE_PUSH_SETUP.md)
+
+https://github.com/user-attachments/assets/82ca8113-f479-49b9-80c6-3043fb26a702
 
 ### 📸 Project Screenshots
 
