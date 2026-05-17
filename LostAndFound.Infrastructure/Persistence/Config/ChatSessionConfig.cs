@@ -23,6 +23,11 @@ namespace LostAndFound.Infrastructure.Persistence.Config
             builder.Property(c => c.LastMessageTime)
                    .HasDefaultValueSql("GETUTCDATE()");
 
+            builder.HasOne(c => c.Report)
+                   .WithMany()
+                   .HasForeignKey(c => c.ReportId)
+                   .OnDelete(DeleteBehavior.Restrict);
+
             builder.HasOne(c => c.User1)
                    .WithMany(u => u.ChatSessions)
                    .HasForeignKey(c => c.User1Id)
@@ -32,6 +37,10 @@ namespace LostAndFound.Infrastructure.Persistence.Config
                    .WithMany()
                    .HasForeignKey(c => c.User2Id)
                    .OnDelete(DeleteBehavior.Restrict);
+
+            builder.HasIndex(c => new { c.ReportId, c.User1Id, c.User2Id })
+                   .IsUnique()
+                   .HasFilter("[ReportId] IS NOT NULL");
 
             builder.HasMany(c => c.Messages)
                    .WithOne(m => m.ChatSession)

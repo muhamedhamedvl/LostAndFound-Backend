@@ -7,6 +7,7 @@ namespace LostAndFound.Application.Interfaces
         Task<IEnumerable<ChatSessionSummaryDto>> GetUserSessionsAsync(int userId);
         Task<ChatSessionDetailsDto> GetSessionDetailsAsync(int sessionId, int userId);
         Task<ChatSessionDetailsDto> OpenOrCreateSessionAsync(int currentUserId, int otherUserId);
+        Task<ConnectWithOwnerResponseDto> ConnectWithOwnerAsync(int currentUserId, int postId);
         Task<IEnumerable<ChatMessageDto>> GetMessagesAsync(int sessionId, int userId);
         Task<ChatMessageDto> SendMessageAsync(int sessionId, int senderId, string text);
         Task<ChatMessageDto> MarkMessageAsReadAsync(int messageId, int userId);

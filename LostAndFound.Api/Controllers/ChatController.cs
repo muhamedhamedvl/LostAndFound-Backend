@@ -54,6 +54,42 @@ namespace LostAndFound.Api.Controllers
             }
         }
 
+        [HttpPost("connect/{postId:int}")]
+        [SwaggerOperation(
+            Summary = "Connect with post owner",
+            Description = "Opens an existing conversation or creates a new one between the authenticated user and the post owner for the specified post. Returns the conversation id. Requires authentication."
+        )]
+        public async Task<IActionResult> ConnectWithOwnerAsync(int postId)
+        {
+            try
+            {
+                var userId = GetCurrentUserId();
+                var result = await _chatService.ConnectWithOwnerAsync(userId, postId);
+                return Ok(BaseResponse<ConnectWithOwnerResponseDto>.SuccessResult(result, "Conversation ready."));
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(BaseResponse<object>.FailureResult(ex.Message));
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(BaseResponse<object>.FailureResult(ex.Message));
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Unauthorized(BaseResponse<object>.FailureResult("Unauthorized"));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(BaseResponse<object>.FailureResult(ex.Message));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to connect with owner for post {PostId}", postId);
+                return StatusCode(500, BaseResponse<object>.FailureResult("An unexpected error occurred."));
+            }
+        }
+
         [HttpPost("sessions/{otherUserId:int}")]
         [SwaggerOperation(
             Summary = "Open or create chat session",

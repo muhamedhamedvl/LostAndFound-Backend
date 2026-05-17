@@ -157,6 +157,75 @@ namespace LostAndFound.Application.Services
             return _mapper.Map<ChatSessionDetailsDto>(hydratedSession);
         }
 
+        public async Task<ConnectWithOwnerResponseDto> ConnectWithOwnerAsync(int currentUserId, int postId)
+        {
+            var report = await _unitOfWork.Reports.GetByIdAsync(postId);
+            if (report == null)
+            {
+                throw new KeyNotFoundException("The post you are trying to connect with does not exist.");
+            }
+
+            var ownerId = report.CreatedById;
+            if (currentUserId == ownerId)
+            {
+                throw new ArgumentException("You cannot start a conversation with yourself.");
+            }
+
+            var currentUser = await _unitOfWork.Users.GetByIdAsync(currentUserId);
+            if (currentUser == null || currentUser.IsDeleted)
+            {
+                throw new UnauthorizedAccessException("Your account is not available.");
+            }
+            if (currentUser.IsBlocked)
+            {
+                throw new UnauthorizedAccessException("Your account has been blocked.");
+            }
+
+            var owner = await _unitOfWork.Users.GetByIdAsync(ownerId);
+            if (owner == null || owner.IsDeleted)
+            {
+                throw new KeyNotFoundException("The post owner is not available.");
+            }
+            if (owner.IsBlocked)
+            {
+                throw new InvalidOperationException("The post owner is currently unavailable.");
+            }
+
+            var existingSession = await _unitOfWork.ChatSessions.FirstOrDefaultAsync(s =>
+                s.ReportId == postId &&
+                ((s.User1Id == currentUserId && s.User2Id == ownerId) ||
+                 (s.User1Id == ownerId && s.User2Id == currentUserId)));
+
+            ChatSession session;
+            if (existingSession != null)
+            {
+                session = existingSession;
+            }
+            else
+            {
+                session = new ChatSession
+                {
+                    ReportId = postId,
+                    User1Id = currentUserId,
+                    User2Id = ownerId,
+                    CreatedAt = DateTime.UtcNow,
+                    LastMessageTime = DateTime.UtcNow
+                };
+
+                await _unitOfWork.ChatSessions.AddAsync(session);
+                await _unitOfWork.SaveChangesAsync();
+            }
+
+            return new ConnectWithOwnerResponseDto
+            {
+                ConversationId = session.Id,
+                PostId = postId,
+                SenderUserId = currentUserId,
+                ReceiverUserId = ownerId,
+                CreatedAt = session.CreatedAt
+            };
+        }
+
         public async Task<IEnumerable<ChatMessageDto>> GetMessagesAsync(int sessionId, int userId)
         {
             await GetSessionAndValidateAsync(sessionId, userId, trackChanges: false, includeUsers: false);
